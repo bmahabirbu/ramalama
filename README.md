@@ -80,9 +80,9 @@ curl -fsSL https://raw.githubusercontent.com/containers/ramalama/s/install.py | 
 | Nvidia GPU (cuda)                  | :white_check_mark: |
 | AMD GPU (rocm)                     | :x: |
 
-Cuda support:
-Built container with cuda drivers and installation of nvidia container toolkit
-built llama.cpp from source with cuda support and added support to offload to vram for faster compute
+## Cuda:
+Built container with Cuda support.
+built llama.cpp from source with cuda support and added the ability to offload to vram for faster compute.
 
 ## COMMANDS
 
