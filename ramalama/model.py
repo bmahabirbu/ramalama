@@ -82,6 +82,9 @@ class Model:
             prompt = " ".join(args.ARGS)
 
         symlink_path = self.pull(args)
+        # added ngl for offloading to gpu vram
+        # the number after represents how much to allocate
+        # use a higher number for gpu's with more vram
         exec_args = [
             "llama-cli",
             "-m",
@@ -91,6 +94,8 @@ class Model:
             "--in-suffix",
             "",
             "--no-display-prompt",
+            "-ngl",
+            "50",
             "-p",
             prompt,
         ] + self.common_params
