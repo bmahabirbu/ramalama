@@ -17,12 +17,12 @@ def in_container():
 
 
 def container_manager():
-    if available("podman"):
-        return "podman"
-
+    # switched to docker for faster testing as podman needs to edit hooks for gpu support 
     if available("docker"):
         return "docker"
-
+        
+    if available("podman"):
+        return "podman"
     return ""
 
 
@@ -113,4 +113,5 @@ def default_image():
     image = os.getenv("RAMALAMA_IMAGE")
     if image:
         return image
-    return "quay.io/ramalama/ramalama:latest"
+    # added the nv container to a personal repo for testing
+    return "docker.io/brianmahabir/nv-test:v1.1"
