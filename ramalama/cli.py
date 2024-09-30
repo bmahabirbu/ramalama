@@ -463,10 +463,13 @@ def run_container(args):
         name = _name()
 
     wd = find_working_directory()
+    # Added --gpu all argument for gpu support on docker
+    # for podman it will be different 
     conman_args = [
         conman,
         "run",
         "--rm",
+        "--gpus=all",
         "-i",
         "--label",
         "RAMALAMA container",
