@@ -77,8 +77,12 @@ curl -fsSL https://raw.githubusercontent.com/containers/ramalama/s/install.py | 
 | CPU                                | :white_check_mark: |
 | Apple Silicon GPU (macOS)          | :white_check_mark: |
 | Apple Silicon GPU (podman-machine) | :x: |
-| Nvidia GPU (cuda)                  | :x: |
+| Nvidia GPU (cuda)                  | :white_check_mark: |
 | AMD GPU (rocm)                     | :x: |
+
+Cuda support:
+Built container with cuda drivers and installation of nvidia container toolkit
+built llama.cpp from source with cuda support and added support to offload to vram for faster compute
 
 ## COMMANDS
 
