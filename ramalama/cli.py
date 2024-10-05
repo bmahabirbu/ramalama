@@ -1,5 +1,3 @@
-#!/usr/bin/python3
-
 from argparse import ArgumentParser
 from pathlib import Path
 import argparse
@@ -16,7 +14,7 @@ from ramalama.common import in_container, container_manager, exec_cmd, run_cmd, 
 from ramalama.oci import OCI
 from ramalama.ollama import Ollama
 from ramalama.shortnames import Shortnames
-from ramalama.version import version
+from ramalama.version import version, print_version
 
 
 class HelpException(Exception):
@@ -24,8 +22,14 @@ class HelpException(Exception):
 
 
 def use_container():
-    transport = os.getenv("RAMALAMA_IN_CONTAINER", "true")
-    return transport.lower() == "true"
+    transport = os.getenv("RAMALAMA_IN_CONTAINER")
+    if transport:
+        return transport.lower() == "true"
+
+    if in_container() or sys.platform == "darwin":
+        return False
+
+    return True
 
 
 def init_cli():
@@ -40,9 +44,17 @@ def init_cli():
     )
     parser.add_argument("--dry-run", dest="dryrun", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
-        "--nocontainer",
-        default=not use_container(),
+        "--container",
+        dest="container",
+        default=use_container(),
         action="store_true",
+        help="run RamaLama in the default container",
+    )
+    parser.add_argument(
+        "--nocontainer",
+        dest="container",
+        default=False,
+        action="store_false",
         help="do not run RamaLama in the default container",
     )
     parser.add_argument(
@@ -86,7 +98,7 @@ def init_cli():
 def login_parser(subparsers):
     parser = subparsers.add_parser("login", help="login to remote registry")
     # Do not run in a container
-    parser.add_argument("--nocontainer", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--container", default=False, action="store_false", help=argparse.SUPPRESS)
     parser.add_argument("-p", "--password", dest="password", help="password for registry")
     parser.add_argument(
         "--password-stdin", dest="passwordstdin", action="store_true", help="take the password for registry from stdin"
@@ -108,7 +120,7 @@ def login_cli(args):
 def logout_parser(subparsers):
     parser = subparsers.add_parser("logout", help="logout from remote registry")
     # Do not run in a container
-    parser.add_argument("--nocontainer", default=True, action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--container", default=False, action="store_false", help=argparse.SUPPRESS)
     parser.add_argument("--token", help="token for registry")
     parser.add_argument("TRANSPORT", nargs="?", type=str, default="")  # positional argument
     parser.add_argument("TRANSPORT", nargs="?", type=str, default="")  # positional argument
@@ -181,7 +193,8 @@ def containers_parser(subparsers):
     parser = subparsers.add_parser("containers", aliases=["ps"], help="list all RamaLama containers")
     parser.add_argument("--format", help="pretty-print containers to JSON or using a Go template")
     parser.add_argument("-n", "--noheading", dest="noheading", action="store_true", help="do not display heading")
-    parser.add_argument("--nocontainer", default=True, action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--no-trunc", dest="notrunc", action="store_true", help="display the extended information")
+    parser.add_argument("--container", default=False, action="store_false", help=argparse.SUPPRESS)
     parser.set_defaults(func=list_containers)
 
 
@@ -193,6 +206,8 @@ def _list_containers(args):
     conman_args = [conman, "ps", "-a", "--filter", "label=RAMALAMA container"]
     if args.noheading:
         conman_args += ["--noheading"]
+    if hasattr(args, "notrunc") and args.notrunc:
+        conman_args += ["--no-trunc"]
 
     if args.format:
         conman_args += [f"--format={args.format}"]
@@ -283,7 +298,7 @@ def list_cli(args):
 def help_parser(subparsers):
     parser = subparsers.add_parser("help", help="help about any command")
     # Do not run in a container
-    parser.add_argument("--nocontainer", default=True, action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--container", default=False, action="store_false", help=argparse.SUPPRESS)
     parser.set_defaults(func=help_cli)
 
 
@@ -353,7 +368,7 @@ def serve_parser(subparsers):
 
 
 def serve_cli(args):
-    if args.nocontainer:
+    if not args.container:
         args.detach = False
     model = New(args.MODEL)
     model.serve(args)
@@ -366,7 +381,7 @@ def stop_cli(args):
 
 def stop_parser(subparsers):
     parser = subparsers.add_parser("stop", help="stop named container that is running AI Model")
-    parser.add_argument("--nocontainer", default=True, action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--container", default=False, action="store_false", help=argparse.SUPPRESS)
     parser.add_argument("-a", "--all", action="store_true", help="stop all RamaLama containers")
     parser.add_argument(
         "--ignore", action="store_true", help="ignore errors when specified RamaLama container is missing"
@@ -402,8 +417,8 @@ def stop_container(args):
 def version_parser(subparsers):
     parser = subparsers.add_parser("version", help="display version of AI Model")
     # Do not run in a container
-    parser.add_argument("--nocontainer", default=True, action="store_true", help=argparse.SUPPRESS)
-    parser.set_defaults(func=version)
+    parser.add_argument("--container", default=False, action="store_false", help=argparse.SUPPRESS)
+    parser.set_defaults(func=print_version)
 
 
 def rm_parser(subparsers):
@@ -442,15 +457,16 @@ def run_container(args):
     if hasattr(args, "generate") and args.generate:
         return False
 
-    if args.nocontainer:
+    if not args.container:
         if hasattr(args, "name") and args.name:
             raise IndexError("--nocontainer and --name options conflict. --name requires a container.")
 
         # --nocontainer implies --detach=false
         if hasattr(args, "detach"):
             args.detach = False
+        return False
 
-    if args.nocontainer or in_container() or sys.platform == "darwin":
+    if in_container():
         return False
 
     conman = container_manager()
@@ -479,9 +495,13 @@ def run_container(args):
         "--name",
         name,
         f"-v{args.store}:/var/lib/ramalama",
-        f"-v{sys.argv[0]}:/usr/bin/ramalama:ro",
+        f"-v{os.path.realpath(sys.argv[0])}:/usr/bin/ramalama:ro",
         f"-v{wd}:/usr/share/ramalama/ramalama:ro",
     ]
+
+    di_volume = distinfo_volume()
+    if di_volume != "":
+        conman_args += [di_volume]
 
     if sys.stdout.isatty():
         conman_args += ["-t"]
@@ -539,3 +559,12 @@ def New(model):
         return OCI(model)
 
     return Ollama(model)
+
+
+def distinfo_volume():
+    dist_info = "ramalama-%s.dist-info" % version()
+    path = os.path.join(os.path.dirname(os.path.dirname(__file__)), dist_info)
+    if not os.path.exists(path):
+        return ""
+
+    return f"-v{path}:/usr/share/ramalama/{dist_info}:ro"

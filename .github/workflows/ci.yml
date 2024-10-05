@@ -10,9 +10,11 @@ jobs:
         run: |
            sudo apt-get update
            sudo apt-get install bats bash codespell python3-argcomplete
-           pipx install omlmd black flake8
+           make install-requirements
       - name: run test
-        run: make test
+        run: |
+           make validate
+           make bats
 
   macos:
     runs-on: macos-14
@@ -20,13 +22,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: install golang
         shell: bash
-        run: brew install go
-	run: make install-requirements
+        run: |
+           brew install go bats bash jq
+           make install-requirements
       - name: Run a one-line script
         shell: bash
-        run: make validate
+        run: |
+           make install-requirements
+           make validate
+           pipx install .
+           make bats-nocontainer
+
 # FIXME: ci script should be able to run on MAC.
 #      - name: Run ci
 #        shell: bash
 #        run: make ci
-

@@ -1,7 +1,16 @@
+import importlib.metadata
+
 """Version of RamaLamaPy."""
 
-__version__ = "0.1.0"
+
+def version():
+    try:
+        return importlib.metadata.version("ramalama")
+    except importlib.metadata.PackageNotFoundError:
+        return 0
+
+    return 0
 
 
-def version(args):
-    print("ramalama version " + __version__)
+def print_version(args):
+    print("ramalama version %s" % version())

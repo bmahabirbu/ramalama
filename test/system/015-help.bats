@@ -12,7 +12,7 @@ load helpers
 
 function check_help() {
     local count=0
-    local -A found
+    local found
 
     echo $(_ramalama_commands "$@")
     for cmd in $(_ramalama_commands "$@"); do
@@ -133,7 +133,7 @@ function check_help() {
     # Test for regression of #7273 (spurious "--remote" help on output)
     for helpopt in help --help -h; do
         run_ramalama $helpopt
-        is "${lines[0]}" "usage: ramalama [-h] [--store STORE] [--dryrun] [--nocontainer]" \
+        is "${lines[0]}" "usage: ramalama [-h] [--store STORE] [--dryrun] [--container] [--nocontainer]" \
            "ramalama $helpopt: first line of output"
     done
 

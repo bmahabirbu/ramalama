@@ -35,16 +35,12 @@ help:
 
 .PHONY:
 install-requirements:
-	@pipx install -q black flake8
-	$(PYTHON) -m pip install --user -r requirements.txt
-	pip install "huggingface_hub[cli]==0.25.1"
-	pip install "omlmd==0.1.4"
+	pipx install tqdm black flake8 argcomplete wheel omlmd huggingface_hub[cli] codespell
 
 .PHONY:
 install-completions:
 	install ${SELINUXOPT} -d -m 755 $(DESTDIR)${SHAREDIR}/bash-completion/completions
 	register-python-argcomplete --shell bash ramalama > $(DESTDIR)${SHAREDIR}/bash-completion/completions/ramalama
-
 	install ${SELINUXOPT} -d -m 755 $(DESTDIR)${SHAREDIR}/fish/vendor_completions.d
 	register-python-argcomplete --shell fish ramalama > $(DESTDIR)${SHAREDIR}/fish/vendor_completions.d/ramalama.fish
 
@@ -53,19 +49,25 @@ install-completions:
 #	register-python-argcomplete --shell zsh ramalama > $(DESTDIR)${SHAREDIR}/zsh/site/_ramalama
 
 .PHONY:
-install-program:
-	install ${SELINUXOPT} -d -m 755 $(DESTDIR)$(BINDIR)
-	install ${SELINUXOPT} -m 755 ramalama.py \
-		$(DESTDIR)$(BINDIR)/ramalama
-
-.PHONY:
 install-shortnames:
 	install ${SELINUXOPT} -d -m 755 $(DESTDIR)$(SHAREDIR)/ramalama
 	install ${SELINUXOPT} -m 644 shortnames/shortnames.conf \
 		$(DESTDIR)$(SHAREDIR)/ramalama
 
 .PHONY:
-install: install-program install-shortnames install-docs install-completions
+completions:
+	mkdir -p build/completions/bash-completion/completions
+	register-python-argcomplete --shell bash ramalama > build/completions/bash-completion/completions/ramalama
+
+	mkdir -p build/completions/fish/vendor_completions.d
+	register-python-argcomplete --shell fish ramalama > build/completions/fish/vendor_completions.d/ramalama.fish
+
+# FIXME: not available on Centos 9 yet.
+#	mkdir -p build/completions/zsh/site
+#	register-python-argcomplete --shell zsh ramalama > build/completions/zsh/site/_ramalama
+
+.PHONY:
+install: docs completions
 	RAMALAMA_VERSION=$(RAMALAMA_VERSION) \
 	pip install . --root $(DESTDIR) --prefix ${PREFIX}
 
@@ -99,17 +101,27 @@ ifeq ($(OS),Linux)
 	hack/xref-helpmsgs-manpages
 endif
 
+.PHONY:
+pypi:   clean
+	make docs
+	python3 -m build --sdist
+	python3 -m build --wheel
+	python3 -m twine upload dist/*
+
 .PHONY: bats
 bats:
-	RAMALAMA=$(CURDIR)/ramalama.py bats -T test/system/
-	_RAMALAMA_TEST_OPTS=--nocontainer RAMALAMA=$(CURDIR)/ramalama.py bats -T test/system/
+	RAMALAMA=$(CURDIR)/bin/ramalama bats -T test/system/
+
+.PHONY: bats-nocontainer
+bats-nocontainer:
+	_RAMALAMA_TEST_OPTS=--nocontainer RAMALAMA=$(CURDIR)/bin/ramalama bats -T test/system/
 
 .PHONY: ci
 ci:
 	test/ci.sh
 
 .PHONY: test
-test: validate bats ci codespell
+test: validate bats bats-nocontainer ci
 	make clean
 	hack/tree_status.sh
 
