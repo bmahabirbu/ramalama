@@ -1,10 +1,5 @@
 FROM nvidia/cuda:12.2.0-devel-ubi9
 
-#VLLM 
-#RUN pip install vllm
-
-# Pytorch wit GPU support
-
 # renovate: datasource=github-releases depName=huggingface/huggingface_hub extractVersion=^v(?<version>.*)
 ARG HUGGINGFACE_HUB_VERSION=0.25.0
 # renovate: datasource=github-releases depName=containers/omlmd extractVersion=^v(?<version>.*)
