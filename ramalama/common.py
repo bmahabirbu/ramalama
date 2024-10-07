@@ -121,4 +121,4 @@ def default_image():
     if image:
         return image
     # added the nv container to a personal repo for testing
-    return "docker.io/brianmahabir/nv-test:v1.1"
+    return "docker.io/brianmahabir/nv-test:v1.2"

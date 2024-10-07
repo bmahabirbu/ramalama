@@ -488,7 +488,7 @@ def run_container(args):
         "--gpus=all",
         "-i",
         "--label",
-        "RAMALAMA container",
+        "RAMALAMA_container",
         "--security-opt=label=disable",
         "-e",
         "RAMALAMA_TRANSPORT",

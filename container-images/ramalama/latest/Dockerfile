@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.2.0-devel-ubi9
+FROM nvidia/cuda:12.6.1-devel-ubi9
 
 # renovate: datasource=github-releases depName=huggingface/huggingface_hub extractVersion=^v(?<version>.*)
 ARG HUGGINGFACE_HUB_VERSION=0.25.0
@@ -23,10 +23,15 @@ RUN /usr/bin/python3 --version
 RUN pip install "huggingface_hub[cli]==${HUGGINGFACE_HUB_VERSION}"
 RUN pip install "omlmd==${OMLMD_VERSION}"
 
-RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1
-RUN LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs/
+# Build wouldnt complete couldnt find libcuda so made a systemlink
+# But this didnt work
 
-ENV GGML_CCACHE=0
+# RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1
+# RUN LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs/
+
+# Disable cashing for debugging build
+
+# ENV GGML_CCACHE=0
 
 # Build wouldnt complete with cmake even with nvidia container toolkit installed
 
