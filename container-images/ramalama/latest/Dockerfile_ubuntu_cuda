@@ -1,48 +1,62 @@
-FROM nvidia/cuda:12.6.1-devel-ubi9
+FROM nvidia/cuda:12.6.1-devel-ubuntu20.04
+
+# Set environment variables to non-interactive to avoid prompts during installation
+ENV DEBIAN_FRONTEND=noninteractive
 
 # renovate: datasource=github-releases depName=huggingface/huggingface_hub extractVersion=^v(?<version>.*)
 ARG HUGGINGFACE_HUB_VERSION=0.25.0
 # renovate: datasource=github-releases depName=containers/omlmd extractVersion=^v(?<version>.*)
 ARG OMLMD_VERSION=0.1.4
 # renovate: datasource=git-refs depName=ggerganov/llama.cpp packageName=https://github.com/ggerganov/llama.cpp gitRef=master versioning=loose type=digest
-ARG LLAMA_CPP_SHA=32b2ec88bc44b086f3807c739daf28a1613abde1
+ARG LLAMA_CPP_SHA=dca1d4b58a7f1acf1bd253be84e50d6367f492fd
 # renovate: datasource=git-refs depName=ggerganov/whisper.cpp packageName=https://github.com/ggerganov/whisper.cpp gitRef=master versioning=loose type=digest
 ARG WHISPER_CPP_SHA=5caa19240d55bfd6ee316d50fbad32c6e9c39528
 
-# vulkan-headers vulkan-loader-devel vulkan-tools glslc glslang python3-pip mesa-libOpenCL-$MESA_VER.aarch64
-RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
-    crb enable && \
-    dnf install -y epel-release && \
-    dnf --enablerepo=ubi-9-appstream-rpms install -y git procps-ng vim \
-      dnf-plugins-core python3-dnf-plugin-versionlock cmake gcc-c++ \
-      python3-pip && \
-    dnf clean all && \
-    rm -rf /var/cache/*dnf*
+ARG CUDA_DOCKER_ARCH=default
 
-RUN /usr/bin/python3 --version
-RUN pip install "huggingface_hub[cli]==${HUGGINGFACE_HUB_VERSION}"
-RUN pip install "omlmd==${OMLMD_VERSION}"
+# Install necessary packages
+RUN apt-get update && \
+    apt-get install -y \
+        software-properties-common \
+        git \
+        procps \
+        vim \
+        curl \
+        build-essential \
+        cmake \
+        python3-pip && \
+    rm -rf /var/lib/apt/lists/*
+
+# Verify Python version
+RUN python3 --version
+
+# Install Python packages
+RUN pip3 install "huggingface_hub[cli]==${HUGGINGFACE_HUB_VERSION}"
+RUN pip3 install "omlmd==${OMLMD_VERSION}"
 
 # Build wouldnt complete couldnt find libcuda so made a systemlink
-# But this didnt work
 
 # RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1
 # RUN LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs/
 
-# Disable cashing for debugging build
-
-# ENV GGML_CCACHE=0
-
-# Build wouldnt complete with cmake even with nvidia container toolkit installed
+# CUDA_DOCKER_ARCH = 
+# Turing GPUs (e.g., RTX 20 Series, GTX 16 Series): Use 75
+# Ampere GPUs (e.g., RTX 30 Series, A100): Use 80
+# Hopper GPUs (e.g., H100): Use 90
+# Volta GPUs (e.g., V100): Use 70
+# Pascal GPUs (e.g., GTX 10 Series): Use 61
+# Kepler GPUs (e.g., GTX 600 and 700 Series): Use 35
 
 RUN git clone https://github.com/ggerganov/llama.cpp && \
     cd llama.cpp && \
     git reset --hard ${LLAMA_CPP_SHA} && \
-    make -j $(nproc) GGML_CUDA=1 CUDA_ARCH=ALL && \
+    cmake -B build -DGGML_CUDA=ON ${CMAKE_ARGS} -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined . && \
+    cmake --build build --config Release -j$(nproc) && \
+    cd build/bin && \
     mv llama-cli /usr/bin/llama-cli && \
     mv llama-server /usr/bin/llama-server && \
-    cd / && \
-    rm -rf llama.cpp
+    mv llama-eval-callback /usr/bin/llama-eval-callback && \
+    cd /
 
 RUN git clone https://github.com/ggerganov/whisper.cpp.git && \
     cd whisper.cpp && \

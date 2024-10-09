@@ -1,6 +1,7 @@
 import os
 import sys
 from ramalama.common import container_manager, exec_cmd, default_image
+import subprocess
 
 
 class Model:
@@ -85,6 +86,12 @@ class Model:
         # added ngl for offloading to gpu vram
         # the number after represents how much to allocate
         # use a higher number for gpu's with more vram
+        # help_args = ["llama-eval-callback", "--help"]
+        # help_output = exec_cmd(help_args)
+        # print(help_output)  
+
+        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
         exec_args = [
             "llama-cli",
             "-m",
@@ -93,18 +100,35 @@ class Model:
             "",
             "--in-suffix",
             "",
-            "--no-display-prompt",
             "-ngl",
             "99",
+            "-t",
+            "8",
+            "--n-predict",
+            "100",
             "-p",
             prompt,
         ] + self.common_params
         if not args.ARGS:
             exec_args.append("-cnv")
 
-        print(" ".join(str(x) for x in exec_args))
+        # exec_args = [
+        #     "llama-eval-callback",
+        #     "-m",
+        #     symlink_path,
+        #     "-ngl",
+        #     "1",
+        #     "-t",
+        #     "8",
+        #     "--n-predict",
+        #     "100", 
+        #     "-p", prompt,  
+        # ] + self.common_params
 
-        exec_cmd(exec_args, False)
+        print(" ".join(str(x) for x in exec_args))
+        print("\n")
+
+        exec_cmd(exec_args, True)
 
     def serve(self, args):
         symlink_path = self.pull(args)

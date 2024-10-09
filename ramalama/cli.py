@@ -527,6 +527,8 @@ def run_container(args):
     if args.dryrun:
         dry_run(conman_args)
         return True
+    
+    # print(" ".join(str(x) for x in conman_args))
 
     exec_cmd(conman_args)
 
