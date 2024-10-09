@@ -95,12 +95,14 @@ class Model:
             "",
             "--no-display-prompt",
             "-ngl",
-            "50",
+            "99",
             "-p",
             prompt,
         ] + self.common_params
         if not args.ARGS:
             exec_args.append("-cnv")
+
+        print(" ".join(str(x) for x in exec_args))
 
         exec_cmd(exec_args, False)
 

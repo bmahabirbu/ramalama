@@ -17,12 +17,12 @@ def in_container():
 
 
 def container_manager():
-    # switched to docker for faster testing as podman needs to edit hooks for gpu support 
+    if available("podman"):
+        return "podman"
+
     if available("docker"):
         return "docker"
         
-    if available("podman"):
-        return "podman"
     return ""
 
 
