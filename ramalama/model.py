@@ -10,7 +10,7 @@ class Model:
     model = ""
     conman = container_manager()
     type = "Model"
-    common_params = ["-c", "2048"]
+    common_params = ["-c", "8192"]
 
     def __init__(self, model):
         self.model = model
@@ -104,8 +104,6 @@ class Model:
             "99",
             "-t",
             "8",
-            "--n-predict",
-            "100",
             "-p",
             prompt,
         ] + self.common_params
