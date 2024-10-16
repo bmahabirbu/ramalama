@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.6.1-devel-ubuntu20.04
+FROM docker.io/nvidia/cuda:12.6.2-devel-ubuntu20.04
 
 # Set environment variables to non-interactive to avoid prompts during installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -6,11 +6,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 # renovate: datasource=github-releases depName=huggingface/huggingface_hub extractVersion=^v(?<version>.*)
 ARG HUGGINGFACE_HUB_VERSION=0.25.0
 # renovate: datasource=github-releases depName=containers/omlmd extractVersion=^v(?<version>.*)
-ARG OMLMD_VERSION=0.1.4
-# renovate: datasource=git-refs depName=ggerganov/llama.cpp packageName=https://github.com/ggerganov/llama.cpp gitRef=master versioning=loose type=digest
+ARG OMLMD_VERSION=0.1.6
 ARG LLAMA_CPP_SHA=dca1d4b58a7f1acf1bd253be84e50d6367f492fd
 # renovate: datasource=git-refs depName=ggerganov/whisper.cpp packageName=https://github.com/ggerganov/whisper.cpp gitRef=master versioning=loose type=digest
-ARG WHISPER_CPP_SHA=5caa19240d55bfd6ee316d50fbad32c6e9c39528
+ARG WHISPER_CPP_SHA=b6049060dd2341b7816d2bce7dc7451c1665828e
 
 ARG CUDA_DOCKER_ARCH=default
 
@@ -34,11 +33,6 @@ RUN python3 --version
 RUN pip3 install "huggingface_hub[cli]==${HUGGINGFACE_HUB_VERSION}"
 RUN pip3 install "omlmd==${OMLMD_VERSION}"
 
-# Build wouldnt complete couldnt find libcuda so made a systemlink
-
-# RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1
-# RUN LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs/
-
 # CUDA_DOCKER_ARCH = 
 # Turing GPUs (e.g., RTX 20 Series, GTX 16 Series): Use 75
 # Ampere GPUs (e.g., RTX 30 Series, A100): Use 80
@@ -46,6 +40,9 @@ RUN pip3 install "omlmd==${OMLMD_VERSION}"
 # Volta GPUs (e.g., V100): Use 70
 # Pascal GPUs (e.g., GTX 10 Series): Use 61
 # Kepler GPUs (e.g., GTX 600 and 700 Series): Use 35
+
+# Followed https://github.com/ggerganov/llama.cpp/blob/master/.devops/full-cuda.Dockerfile
+# for reference to build llama.cpp with cuda using cmake
 
 RUN git clone https://github.com/ggerganov/llama.cpp && \
     cd llama.cpp && \
