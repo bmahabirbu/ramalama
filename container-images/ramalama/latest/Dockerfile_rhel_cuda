@@ -38,19 +38,30 @@ RUN git clone https://github.com/ggerganov/llama.cpp && \
     git reset --hard ${LLAMA_CPP_SHA} && \
     cmake -B build -DGGML_CUDA=ON CUDA_DOCKER_ARCH=80 -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined . && \
     cmake --build build --config Release -j$(nproc) && \
-    cd build/bin && \
-    mv llama-cli /usr/bin/llama-cli && \
-    mv llama-server /usr/bin/llama-server && \
+    # Move llama-cli and llama-server to /usr/bin
+    mv build/bin/llama-cli /usr/bin/llama-cli && \
+    mv build/bin/llama-server /usr/bin/llama-server && \
+    # Move shared libraries to a standard library directory
+    mv build/ggml/src/libggml.so /usr/lib/libggml.so && \
+    mv build/src/libllama.so /usr/lib/libllama.so && \
+    # Update the dynamic linker cache
+    ldconfig && \
+    # Clean up
     cd / && \
     rm -rf llama.cpp
 
 RUN git clone https://github.com/ggerganov/whisper.cpp.git && \
     cd whisper.cpp && \
     git reset --hard ${WHISPER_CPP_SHA} && \
-    cmake -B build -DGGML_CUDA=ON CUDA_DOCKER_ARCH=80 -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined . && \
+    cmake -B build -DGGML_CUDA=ON -DCUDA_DOCKER_ARCH=80 -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined . && \
     cmake --build build --config Release -j$(nproc) && \
-    cd build/bin && \
-    mv main /usr/bin/whisper-main && \
-    mv server /usr/bin/whisper-server && \
+    # Move whisper binaries to /usr/bin
+    mv build/bin/main /usr/bin/whisper-main && \
+    mv build/bin/server /usr/bin/whisper-server && \
+    # Move any shared libraries to a standard library directory if needed
+    if [ -f build/lib/libwhisper.so ]; then mv build/lib/libwhisper.so /usr/lib/libwhisper.so; fi && \
+    # Update the dynamic linker cache if any shared libraries were moved
+    ldconfig || true && \
+    # Clean up
     cd / && \
     rm -rf whisper.cpp
