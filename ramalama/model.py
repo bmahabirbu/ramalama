@@ -120,8 +120,11 @@ class Model:
         if not args.ARGS and sys.stdin.isatty():
             exec_args.append("-cnv")
 
+        exec_args_string = ' '.join(exec_args)
+        print(exec_args_string)
+
         try:
-            exec_cmd(exec_args, False)
+            exec_cmd(exec_args, True)
         except FileNotFoundError as e:
             if in_container():
                 raise NotImplementedError(file_not_found_in_container % (exec_args[0], str(e).strip("'")))

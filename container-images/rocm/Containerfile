@@ -12,23 +12,40 @@ RUN dnf config-manager --add-repo https://mirror.stream.centos.org/9-stream/AppS
 RUN curl -o /etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-Official http://mirror.centos.org/centos/RPM-GPG-KEY-CentOS-Official
 RUN rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-Official
 
+# Install dependencies and configure amd passthrough
 RUN dnf install -y rocm-dev hipblas-devel rocblas-devel && \
-    dnf clean all && \
-    git clone https://github.com/ggerganov/llama.cpp && \
+    dnf clean all
+
+# Set nvcc architecture
+ENV AMDGPU_TARGETS=gfx1100
+
+# Set up llama.cpp
+RUN git clone https://github.com/ggerganov/llama.cpp && \
     cd llama.cpp && \
     git reset --hard ${LLAMA_CPP_SHA} && \
     cmake -B build -DCMAKE_INSTALL_PREFIX:PATH=/usr -DGGML_CCACHE=0 \
-      -DGGML_HIPBLAS=1 && \
-    cmake --build build --config Release -j $(nproc) && \
+      -DGGML_HIPBLAS=ON -DAMDGPU_TARGETS=${ROCM_DOCKER_ARCH} && \
+    cmake --build build --config Release -j$(nproc) && \
     cmake --install build && \
-    cd / && \
-    git clone https://github.com/ggerganov/whisper.cpp.git && \
-    cd whisper.cpp && \
-    git reset --hard ${WHISPER_CPP_SHA} && \
-    make -j $(nproc) GGML_HIPBLAS=1 && \
-    mv main /usr/bin/whisper-main && \
-    mv server /usr/bin/whisper-server && \
-    cd / && \
-    rm -rf /var/cache/*dnf* /opt/rocm-*/lib/llvm \
-      /opt/rocm-*/lib/rocblas/library/*gfx9* llama.cpp whisper.cpp
+    cd /
+  
+# # Set up whisper.cpp
+# RUN git clone https://github.com/ggerganov/whisper.cpp.git && \
+#     cd whisper.cpp && \
+#     git reset --hard ${WHISPER_CPP_SHA} && \
+#     HIPCXX="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)" && \
+#     cmake -S . -B build -DGGML_HIPBLAS=ON -DAMDGPU_TARGETS=${ROCM_DOCKER_ARCH} -DCMAKE_BUILD_TYPE=Release && \
+#     cmake --build build --config Release -j$(nproc) && \
+#     # Move whisper binaries to /usr/bin
+#     mv build/bin/main /usr/bin/whisper-main && \
+#     mv build/bin/server /usr/bin/whisper-server && \
+#     # Move any shared libraries to a standard library directory if needed
+#     if [ -f build/lib/libwhisper.so ]; then mv build/lib/libwhisper.so /usr/lib/libwhisper.so; fi && \
+#     # Update the dynamic linker cache if any shared libraries were moved
+#     ldconfig || true && \
+#     # Clean up
+#     cd /
 
+# # Clean up
+# RUN rm -rf /var/cache/*dnf* /opt/rocm-*/lib/llvm \
+#       /opt/rocm-*/lib/rocblas/library/*gfx9* llama.cpp whisper.cpp

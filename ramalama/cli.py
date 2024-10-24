@@ -616,7 +616,8 @@ def run_container(args):
     if gpu_type == "HIP_VISIBLE_DEVICES":
         conman_args += ["-e", f"{gpu_type}={gpu_num}"]
         if args.image == default_image():
-            conman_args += ["quay.io/ramalama/rocm:latest"]
+            conman_args += ["--group-add", "keep-groups"]
+            conman_args += ["localhost/rama-rocm:v1"]
         else:
             conman_args += [args.image]
     else:
@@ -631,6 +632,9 @@ def run_container(args):
     if args.dryrun:
         dry_run(conman_args)
         return True
+    
+    conman_args_string = ' '.join(conman_args)
+    print(conman_args_string)
 
     exec_cmd(conman_args)
 
