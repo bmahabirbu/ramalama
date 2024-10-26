@@ -32,6 +32,7 @@ RUN dnf install -y rocm-dev hipblas-devel rocblas-devel && \
     cd / && \
     git clone https://github.com/ggerganov/whisper.cpp.git && \
     cd whisper.cpp && \
+    git reset --hard ${WHISPER_CPP_SHA} && \
     cmake -B build -DCMAKE_INSTALL_PREFIX:PATH=/usr -DGGML_CCACHE=0 \
       -DGGML_HIPBLAS=ON -DAMDGPU_TARGETS=${ROCM_DOCKER_ARCH} && \
     cmake --build build --config Release -j$(nproc) && \
