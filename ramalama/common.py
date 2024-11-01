@@ -121,4 +121,4 @@ def default_image():
     if image:
         return image
     # added the nv container to a personal repo for testing
-    return "localhost/rama-cuda:v1"
+    return "localhost/rama-small:v1"
