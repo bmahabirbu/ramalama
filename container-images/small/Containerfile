@@ -1,0 +1,57 @@
+# Base image with CUDA for compilation
+FROM docker.io/nvidia/cuda:12.6.2-devel-ubi9 AS builder
+
+# Renovate-managed variables
+ARG HUGGINGFACE_HUB_VERSION=0.25.2
+ARG OMLMD_VERSION=0.1.6
+ARG LLAMA_CPP_SHA=dca1d4b58a7f1acf1bd253be84e50d6367f492fd
+ARG WHISPER_CPP_SHA=b6049060dd2341b7816d2bce7dc7451c1665828e
+ARG CUDA_DOCKER_ARCH=default
+
+# Install dependencies only needed for building
+RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    dnf install -y git cmake gcc-c++ python3-pip && \
+    dnf clean all && rm -rf /var/cache/*dnf*
+
+# Install Python packages
+RUN pip install "huggingface_hub==${HUGGINGFACE_HUB_VERSION}" "omlmd==${OMLMD_VERSION}"
+
+# Build llama.cpp
+RUN git clone https://github.com/ggerganov/llama.cpp && cd llama.cpp && \
+    git reset --hard ${LLAMA_CPP_SHA} && \
+    cmake -B build -DGGML_CUDA=ON -DCUDA_DOCKER_ARCH=${CUDA_DOCKER_ARCH} -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined . && \
+    cmake --build build --config Release -j$(nproc) && \
+    mv build/bin/llama-cli /usr/bin/ && mv build/bin/llama-server /usr/bin/ && \
+    mv build/ggml/src/libggml.so /usr/lib/ && mv build/src/libllama.so /usr/lib/ && \
+    cd / && rm -rf llama.cpp
+
+# Build whisper.cpp
+RUN git clone https://github.com/ggerganov/whisper.cpp && cd whisper.cpp && \
+    git reset --hard ${WHISPER_CPP_SHA} && \
+    cmake -B build -DGGML_CUDA=ON -DCUDA_DOCKER_ARCH=${CUDA_DOCKER_ARCH} -DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined . && \
+    cmake --build build --config Release -j$(nproc) && \
+    mv build/bin/main /usr/bin/whisper-main && mv build/bin/server /usr/bin/whisper-server && \
+    if [ -f build/lib/libwhisper.so ]; then mv build/lib/libwhisper.so /usr/lib/; fi && \
+    cd / && rm -rf whisper.cpp
+
+# Final runtime image
+FROM docker.io/nvidia/cuda:12.6.2-runtime-ubi9
+
+# Renovate Args
+ARG HUGGINGFACE_HUB_VERSION=0.25.2
+ARG OMLMD_VERSION=0.1.6
+
+# Install minimal runtime dependencies
+RUN dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    dnf install -y python3 python3-pip && dnf clean all && rm -rf /var/cache/*dnf*
+
+# Install Python packages in the runtime image
+RUN pip install "huggingface_hub==${HUGGINGFACE_HUB_VERSION}" "omlmd==${OMLMD_VERSION}"
+
+# Copy only necessary files from the build stage
+COPY --from=builder /usr/bin/llama-cli /usr/bin/llama-server /usr/bin/
+COPY --from=builder /usr/bin/whisper-main /usr/bin/whisper-server /usr/bin/
+COPY --from=builder /usr/lib/libggml.so /usr/lib/libllama.so /usr/lib/
+
+# Update dynamic linker cache
+RUN ldconfig || true

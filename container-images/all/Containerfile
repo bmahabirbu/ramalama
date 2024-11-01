@@ -1,0 +1,74 @@
+# Unified container for both NVIDIA (CUDA) and ROCm
+
+# ARG definitions
+ARG GOLANG_VERSION=1.22.8
+ARG CMAKE_VERSION=3.22.1
+ARG CUDA_VERSION_11=11.3.1
+ARG CUDA_VERSION_12=12.4.0
+ARG ROCM_VERSION=6.1.2
+
+# NVIDIA and ROCm compatible builder
+FROM rockylinux:8 as base
+RUN dnf -y install epel-release && \
+    dnf -y install gcc gcc-c++ make cmake git zsh wget curl pigz && \
+    dnf clean all
+
+# Install ROCm dependencies
+FROM base as rocm-builder
+ARG ROCM_VERSION
+RUN dnf config-manager --add-repo \
+      https://mirror.stream.centos.org/9-stream/AppStream/$(uname -m)/os/
+RUN curl --retry 8 -o /etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-Official \
+    http://mirror.centos.org/centos/RPM-GPG-KEY-CentOS-Official && \
+    cat /etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-Official
+RUN rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-Official
+RUN dnf install -y rocm-dev hipblas-devel && \
+    dnf clean all
+
+# Install CUDA dependencies for NVIDIA support
+FROM base as cuda-builder
+ARG CUDA_VERSION_11
+ARG CUDA_VERSION_12
+RUN dnf -y install yum-utils && \
+    yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo && \
+    dnf -y install cuda-toolkit-${CUDA_VERSION_11} cuda-toolkit-${CUDA_VERSION_12} && \
+    dnf clean all
+
+# Set up for building binaries
+FROM rockylinux:8 as unified-builder
+COPY --from=rocm-builder /opt/rocm* /opt/rocm/
+COPY --from=cuda-builder /usr/local/cuda* /usr/local/cuda/
+ARG CMAKE_VERSION
+ARG GOLANG_VERSION
+COPY ./scripts/rh_linux_deps.sh /rh_linux_deps.sh
+RUN CMAKE_VERSION=${CMAKE_VERSION} GOLANG_VERSION=${GOLANG_VERSION} sh /rh_linux_deps.sh
+
+# Build llama.cpp and whisper.cpp with CUDA and ROCm support
+RUN git clone https://github.com/ggerganov/llama.cpp && \
+    cd llama.cpp && \
+    cmake -B build -DCMAKE_INSTALL_PREFIX=/usr -DGGML_CUDA=1 -DGGML_HIPBLAS=1 && \
+    cmake --build build --config Release && \
+    cmake --install build && \
+    cd / && rm -rf llama.cpp
+
+RUN git clone https://github.com/ggerganov/whisper.cpp && \
+    cd whisper.cpp && \
+    make -j $(nproc) GGML_CUDA=1 GGML_HIPBLAS=1 && \
+    mv main /usr/bin/whisper-main && \
+    mv server /usr/bin/whisper-server && \
+    cd / && rm -rf whisper.cpp
+
+# Runtime environment setup
+FROM ubuntu:22.04 AS runtime
+COPY --from=unified-builder /usr/bin/whisper-main /usr/bin/
+COPY --from=unified-builder /usr/bin/whisper-server /usr/bin/
+COPY --from=unified-builder /opt/rocm* /opt/rocm/
+COPY --from=unified-builder /usr/local/cuda* /usr/local/cuda/
+COPY --from=unified-builder /usr/lib/ /usr/lib/
+
+# Environment settings for GPU switching
+ENV PATH=/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/opt/rocm/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+ENV OLLAMA_HOST=0.0.0.0
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+ENV NVIDIA_VISIBLE_DEVICES=all
