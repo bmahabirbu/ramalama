@@ -152,7 +152,7 @@ def default_image():
     image = os.getenv("RAMALAMA_IMAGE")
     if image:
         return image
-    return "quay.io/ramalama/ramalama:latest"
+    return "localhost/rama-cuda:v1"
 
 
 def genname():

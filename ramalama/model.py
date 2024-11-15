@@ -267,7 +267,7 @@ class Model:
         if not args.container:
             exec_model_path = model_path
 
-        exec_args = ["llama-simple-chat", "-m", exec_model_path]
+        exec_args = ["llama-simple-chat", "-m", exec_model_path, "-ngl", "99"]
         exec_args += self.common_params
         if args.gpu:
             exec_args.extend(self.gpu_args())
