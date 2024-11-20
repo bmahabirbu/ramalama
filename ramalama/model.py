@@ -145,7 +145,7 @@ class Model:
             conman_args += ["-p", f"{args.port}:{args.port}"]
 
         if sys.platform == "darwin" or os.path.exists("/dev/dri"):
-            conman_args += ["--device", "/dev/dri"]
+            conman_args += ["--gpus=all"]
 
         if os.path.exists("/dev/kfd"):
             conman_args += ["--device", "/dev/kfd"]
