@@ -98,12 +98,11 @@ class Model:
         if args.image != default_image():
             return args.image
 
-        gpu_type, _ = get_gpu()
-        if gpu_type == "HIP_VISIBLE_DEVICES":
-            return "quay.io/ramalama/rocm:latest"
-
-        if gpu_type == "ASAHI_VISIBLE_DEVICES":
+        if os.getenv("ASAHI_VISIBLE_DEVICES"):
             return "quay.io/ramalama/asahi:latest"
+        
+        if os.getenv("VK_VISIBLE_DEVICES"):
+            return "quay.io/ramalama/vulkan:latest"
 
         return args.image
 
@@ -190,14 +189,14 @@ class Model:
         return True
 
     def gpu_args(self):
+        gpu_type, gpu_num = get_gpu()
         gpu_args = []
         if sys.platform == "darwin":
             # llama.cpp will default to the Metal backend on macOS, so we don't need
             # any additional arguments.
             pass
-        elif sys.platform == "linux" and (
-            os.getenv("HIP_VISIBLE_DEVICES") or os.getenv("ASAHI_VISIBLE_DEVICES") or os.getenv("CUDA_VISIBLE_DEVICES")
-        ):
+        elif sys.platform == "linux" and gpu_type is not None:
+            os.environ[gpu_type] = gpu_num
             gpu_args = ["-ngl", "99"]
         else:
             print("GPU offload was requested but is not available on this system")
@@ -227,7 +226,7 @@ class Model:
             dry_run(conman_args)
             return True
 
-        run_cmd(conman_args, debug=args.debug)
+        exec_cmd(conman_args, debug=args.debug)
         return True
 
     def run(self, args):
@@ -283,8 +282,9 @@ class Model:
         if not args.ARGS and sys.stdin.isatty():
             exec_args.append("-cnv")
 
-        if args.gpu:
-            exec_args.extend(self.gpu_args())
+        gpu_args = self.gpu_args() 
+        if gpu_args is not None:
+            exec_args.extend(gpu_args) 
 
         try:
             if self.exec_model_in_container(model_path, exec_args, args):
@@ -335,8 +335,9 @@ class Model:
                 exec_model_path = os.path.dirname(exec_model_path)
             exec_args = ["vllm", "serve", "--port", args.port, exec_model_path]
         else:
-            if args.gpu:
-                exec_args.extend(self.gpu_args())
+            gpu_args = self.gpu_args() 
+            if gpu_args is not None:
+                exec_args.extend(gpu_args) 
             exec_args.extend(["--host", args.host])
 
         if args.generate == "quadlet":
@@ -394,26 +395,44 @@ class Model:
 
 
 def get_gpu():
-    i = 0
-    gpu_num = 0
-    gpu_bytes = 0
-    for fp in sorted(glob.glob('/sys/bus/pci/devices/*/mem_info_vram_total')):
-        with open(fp, 'r') as file:
-            content = int(file.read())
-            if content > 1073741824 and content > gpu_bytes:
-                gpu_bytes = content
-                gpu_num = i
-
-        i += 1
-
-    if gpu_bytes:  # this is the ROCm/AMD case
-        return "HIP_VISIBLE_DEVICES", gpu_num
+    """Detect Vulkan-compatible GPUs and append valid entries to the template."""
 
     if os.path.exists('/etc/os-release'):
         with open('/etc/os-release', 'r') as file:
             content = file.read()
             if "asahi" in content.lower():
                 return "ASAHI_VISIBLE_DEVICES", 1
+
+    gpu_index = -1
+    max_vram = 0
+    
+    try:
+        # Run 'vulkaninfo' and capture its output
+        result = run_cmd(['vulkaninfo'])
+        output = result.stdout
+        
+        # Parse the output for VRAM and GPU index
+        current_gpu_index = -1
+        for line in output.splitlines():
+            if "Device" in line and "Index" in line:
+                # Extract GPU index
+                current_gpu_index = int(line.split(" ")[-1].strip())
+            elif "Memory Budget" in line:
+                # Extract VRAM size (Memory Budget) from the line
+                memory_budget_str = line.split(":")[-1].strip()
+                memory_budget_value = int(memory_budget_str.split(" ")[0].strip())  # VRAM in MB
+                
+                # Compare with current maximum VRAM
+                if memory_budget_value > 1024 and memory_budget_value > max_vram:
+                    max_vram = memory_budget_value
+                    gpu_index = current_gpu_index
+        
+        if gpu_index != -1:
+            return "VK_VISIBLE_DEVICES", gpu_index
+    
+    except FileNotFoundError:
+        print("'vulkaninfo' command not found. Please ensure Vulkan SDK is installed.")
+        return
 
     return None, None
 
