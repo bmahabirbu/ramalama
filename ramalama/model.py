@@ -409,7 +409,7 @@ def get_gpu():
     try:
         # Run 'vulkaninfo' and capture its output
         result = run_cmd(['vulkaninfo'])
-        output = result.stdout
+        output = result.stdout.decode("utf-8")
         
         # Parse the output for VRAM and GPU index
         current_gpu_index = -1
