@@ -407,16 +407,21 @@ def get_gpu():
     max_vram = 0
     
     try:
-        # Run 'vulkaninfo' and capture its output
-        result = run_cmd(['vulkaninfo'])
+        # Run 'vulkaninfo --summary' and capture its output
+        result = run_cmd(['vulkaninfo', '--summary'])
         output = result.stdout.decode("utf-8")
         
         # Parse the output for VRAM and GPU index
         current_gpu_index = -1
         for line in output.splitlines():
-            if "Device" in line and "Index" in line:
-                # Extract GPU index
-                current_gpu_index = int(line.split(" ")[-1].strip())
+            if "GPU" in line and "deviceName" in line:
+                # Extract GPU index and name
+                parts = line.split(":")
+                if len(parts) >= 2:
+                    device_info = parts[1].strip()
+                    # Assuming GPU index can be derived from device name or another pattern
+                    current_gpu_index = int(device_info.split()[0].replace("GPU", "").strip())
+            
             elif "Memory Budget" in line:
                 # Extract VRAM size (Memory Budget) from the line
                 memory_budget_str = line.split(":")[-1].strip()
@@ -435,7 +440,6 @@ def get_gpu():
         return
 
     return None, None
-
 
 def dry_run(args):
     for arg in args:
