@@ -226,7 +226,7 @@ class Model:
             dry_run(conman_args)
             return True
 
-        run_cmd(conman_args, debug=args.debug)
+        run_cmd(conman_args, debug=args.debug, stdout=None)
         return True
 
     def run(self, args):

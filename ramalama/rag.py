@@ -4,17 +4,18 @@ import json
 import logging
 from pathlib import Path
 from typing import Iterable
+from fastapi import FastAPI
+import hashlib
+import uuid
 
 from ramalama.common import run_cmd
 from docling.datamodel.base_models import ConversionStatus
 from docling.datamodel.document import ConversionResult
 from docling.document_converter import DocumentConverter
 
-from llama_index.core import StorageContext, VectorStoreIndex
-from llama_index.node_parser.docling import DoclingNodeParser
-from llama_index.embeddings.huggingface import HuggingFaceEmbedding
-from llama_index.llms.huggingface_api import HuggingFaceInferenceAPI
-from llama_index.vector_stores.milvus import MilvusVectorStore
+from docling_core.transforms.chunker import HierarchicalChunker
+from qdrant_client import QdrantClient
+from docling.datamodel.base_models import InputFormat
 
 _log = logging.getLogger(__name__)
 
@@ -96,59 +97,80 @@ LABEL {ociimage_rag}
 
 
 def generate(args):
-    tmpdir = tempfile.TemporaryDirectory(prefix="ramalama_", delete=True)
+    # tmpdir = tempfile.TemporaryDirectory(prefix="ramalama_", delete=True)
+    # targets = []
+    # for p in args.PATH:
+    #     if os.path.isfile(p):
+    #         targets.append(p)  # Process selected file
+    #         continue
+    #     if os.path.isdir(p):
+    #         targets.extend(walk(p))  # Walk directory and process all files
+    #         continue
+    #     targets.append(p)  # WEB?
+
+    # converter = DocumentConverter()
+    # conv_results = converter.convert_all(targets, raises_on_error=False)
+    # success_count, partial_success_count, failure_count = export_documents(conv_results, output_dir=Path(tmpdir.name))
+    # if failure_count > 0:
+    #     raise RuntimeError(f"failed to convert {failure_count} target(s) out of {len(targets)} documents.")
+
+    # build(tmpdir.name, args.IMAGE, args)
+
+    COLLECTION_NAME = "docling"
+
+    doc_converter = DocumentConverter()
+    # client = QdrantClient(location=":memory:")
+    client = QdrantClient(location="http://localhost:6333")
+
+    client.set_model("sentence-transformers/all-MiniLM-L6-v2")
+    client.set_sparse_model("Qdrant/bm25")
+
+    # if not client.collection_exists(COLLECTION_NAME):
+
+    file_path = "/mnt/c/Users/bmahabir/Desktop/pdfs"
+
     targets = []
-    for p in args.PATH:
-        if os.path.isfile(p):
-            targets.append(p)  # Process selected file
-            continue
-        if os.path.isdir(p):
-            targets.extend(walk(p))  # Walk directory and process all files
-            continue
-        targets.append(p)  # WEB?
 
-    converter = DocumentConverter()
-    conv_results = converter.convert_all(targets, raises_on_error=False)
-    success_count, partial_success_count, failure_count = export_documents(conv_results, output_dir=Path(tmpdir.name))
-    if failure_count > 0:
-        raise RuntimeError(f"failed to convert {failure_count} target(s) out of {len(targets)} documents.")
+    # Check if file_path is a directory or a file
+    if os.path.isdir(file_path):
+        targets.extend(walk(file_path))  # Walk directory and process all files
+    elif os.path.isfile(file_path):
+        targets.append(file_path)  # Process the single file
 
-    build(tmpdir.name, args.IMAGE, args)
+    print(targets)
 
-    # Initialize LlamaIndex components for RAG
-    reader = DoclingNodeParser()
-    embed_model = HuggingFaceEmbedding(model_name="BAAI/bge-small-en-v1.5")
+    result = doc_converter.convert_all(targets)
+
+    print(result)
+
+    documents, metadatas, ids = [], [], []
+    for file in result:
+        for chunk in HierarchicalChunker().chunk(file.document):
+            doc_text = chunk.text
+            documents.append(doc_text)
+            metadatas.append(chunk.meta.export_json_dict())
+            doc_id = generate_hash(doc_text)
+            ids.append(doc_id)
+            
+    ids = client.add(COLLECTION_NAME, documents=documents, metadata=metadatas, ids=ids, batch_size=64)
+
+    # print(ids)
+
+    info = client.get_collection(COLLECTION_NAME)
+    print(info.points_count,"\n")
+
+
+    points = client.query(COLLECTION_NAME, query_text="Brian's labcorp bill cost and details", limit=10)
+
+    print("<=== Retrieved documents ===>")
+    for point in points:
+        print(point.document)
+    #     print(point.metadata)
+
+def generate_hash(document: str) -> str:
+    """Generate a unique hash for a document."""
+        # Generate SHA256 hash of the document text
+    sha256_hash = hashlib.sha256(document.encode('utf-8')).hexdigest()
     
-    gen_model = HuggingFaceInferenceAPI(
-        token=os.getenv("HF_TOKEN"),
-        model_name="mistralai/Mixtral-8x7B-Instruct-v0.1",
-    )
-
-    vector_store = MilvusVectorStore(
-        uri=str(Path(tmpdir.name) / "docling.db"),
-        dim=len(embed_model.get_text_embedding("test")),
-        overwrite=True,
-    )
-
-    index = VectorStoreIndex.from_documents(
-        documents=reader.load_data(targets),
-        storage_context=StorageContext.from_defaults(vector_store=vector_store),
-        embed_model=embed_model,
-    )
-
-    query = "Your custom query here"
-    result = index.as_query_engine(llm=gen_model).query(query)
-
-    print(f"Query: {query}\nResponse: {result.response.strip()}\n")
-    print("Sources:")
-    print([(node.text, node.metadata) for node in result.source_nodes])
-
-# The Plan
-
-# First step 
-# find a method to create and populate a 
-# vector database locally with embedded info
-# Run that database inside a container
-
-# Second step
-# Connect to the database and use Rag
+    # Use the first 32 characters of the hash to create a UUID
+    return str(uuid.UUID(sha256_hash[:32]))
