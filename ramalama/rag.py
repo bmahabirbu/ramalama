@@ -143,6 +143,9 @@ def generate(args):
 
     print(result)
 
+    ## TODO
+    # Optimize how chunking works 
+
     documents, metadatas, ids = [], [], []
     for file in result:
         for chunk in HierarchicalChunker().chunk(file.document):
@@ -164,7 +167,7 @@ def generate(args):
 
     print("<=== Retrieved documents ===>")
     for point in points:
-        print(point.document)
+        print(point.document, " Score: ", point.score, "\n")
     #     print(point.metadata)
 
 def generate_hash(document: str) -> str:
@@ -174,3 +177,14 @@ def generate_hash(document: str) -> str:
     
     # Use the first 32 characters of the hash to create a UUID
     return str(uuid.UUID(sha256_hash[:32]))
+
+## TODO
+# Add functions to clear data base remove files and update files
+# Add a template so that the ai knows not to use the context if it doesnt pertain to the questions
+# On that note add the ability to further inspect scores and context so the context relates properly to the question
+# Fix how docling chunks data so that in properly incorporates data
+# if for example a chunk in a data is really high give more of that data
+# Add the ability for more verbose rag with more context
+
+# Add the ability to run locally or using kube play (VERY IMPORTANT)
+# Add fastapi for kube play
