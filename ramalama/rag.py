@@ -7,6 +7,7 @@ from typing import Iterable
 from fastapi import FastAPI
 import hashlib
 import uuid
+from docling.chunking import HybridChunker
 
 from ramalama.common import run_cmd
 from docling.datamodel.base_models import ConversionStatus
@@ -116,14 +117,21 @@ def generate(args):
 
     # build(tmpdir.name, args.IMAGE, args)
 
+
+    # Set models
+    model = "sentence-transformers/all-MiniLM-L6-v2"
+    # For Hybird search set sparse model
+    spare_model = "Qdrant/bm25"
+
     COLLECTION_NAME = "docling"
 
     doc_converter = DocumentConverter()
+    # uncomment to run database locally
     # client = QdrantClient(location=":memory:")
     client = QdrantClient(location="http://localhost:6333")
 
-    client.set_model("sentence-transformers/all-MiniLM-L6-v2")
-    client.set_sparse_model("Qdrant/bm25")
+    client.set_model(model)
+    client.set_sparse_model(spare_model)
 
     # if not client.collection_exists(COLLECTION_NAME):
 
@@ -141,34 +149,37 @@ def generate(args):
 
     result = doc_converter.convert_all(targets)
 
-    print(result)
-
-    ## TODO
-    # Optimize how chunking works 
-
     documents, metadatas, ids = [], [], []
     for file in result:
-        for chunk in HierarchicalChunker().chunk(file.document):
+        # Chunk the document using HybridChunker
+        for chunk in HybridChunker(tokenizer=model, max_tokens=64).chunk(dl_doc=file.document):
+            # Extract the text and metadata from the chunk
             doc_text = chunk.text
+            doc_meta = chunk.meta.export_json_dict() 
+
+            # Append to respective lists
             documents.append(doc_text)
-            metadatas.append(chunk.meta.export_json_dict())
+            metadatas.append(doc_meta)
+            
+            # Generate unique ID for the chunk
             doc_id = generate_hash(doc_text)
             ids.append(doc_id)
+
             
     ids = client.add(COLLECTION_NAME, documents=documents, metadata=metadatas, ids=ids, batch_size=64)
 
-    # print(ids)
+    print(ids)
 
     info = client.get_collection(COLLECTION_NAME)
     print(info.points_count,"\n")
 
 
-    points = client.query(COLLECTION_NAME, query_text="Brian's labcorp bill cost and details", limit=10)
+    points = client.query(COLLECTION_NAME, query_text="What happens in the House of Usher", limit=10)
 
     print("<=== Retrieved documents ===>")
     for point in points:
         print(point.document, " Score: ", point.score, "\n")
-    #     print(point.metadata)
+        # print(point.metadata)
 
 def generate_hash(document: str) -> str:
     """Generate a unique hash for a document."""
