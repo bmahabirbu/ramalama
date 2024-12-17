@@ -8,8 +8,10 @@ from typing import Iterable
 import hashlib
 import uuid
 import shutil
+import requests
 
 from ramalama.common import run_cmd
+from ramalama.model import Model
 
 # New imports
 from fastapi import FastAPI
@@ -19,9 +21,6 @@ from docling.chunking import HybridChunker
 from docling.datamodel.base_models import ConversionStatus
 from docling.datamodel.document import ConversionResult
 from docling.document_converter import DocumentConverter
-
-# from docling_core.transforms.chunker import HierarchicalChunker
-# from docling.datamodel.base_models import InputFormat
 
 from qdrant_client import QdrantClient
 
@@ -34,12 +33,97 @@ DENSE_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 SPARSE_MODEL = "Qdrant/bm25"
 COLLECTION_NAME = "docs"
 
+TEMPLATE = """
+
+    Here is the context to use to answer the question. Some of the context might not relate to the question.
+    If none of the context relates to the question dont use the context
+
+    {context}
+
+    Now, review the user question and answer it:
+
+    {query}
+"""
+
 class Rag:
-    def __init__(self):
-        pass
-    def query(self, text):
+    def __init__(self, args):
+        self.vector_database = Database(args)
+        self.conv = Converter()
+        self.args = args
+    
+    def add_files(self, file_path):
+        documents, metadata, ids = self.conv.convert(file_path)
+        self.vector_database.add(documents, metadata, ids)
+
+    def query(self, question) -> str:
         # get context from data base and query rama llm for answer
-        pass
+
+        # import serve command and run model from args
+
+        # Get query from database
+        context = self.vector_database.search(question)
+
+        # Combine question and context
+        formatted_query = TEMPLATE.format(context=context, query=question)
+
+        # Define the server endpoint
+        llm_instance = "http://localhost:8080/completion"
+
+        # Define the payload
+        payload = {
+            "prompt": question,
+            "n_predict": 128
+        }
+
+        # Define the headers
+        headers = {
+            "Content-Type": "application/json"
+        }
+
+        # Send the POST request
+        response = requests.post(llm_instance, json=payload, headers=headers)
+
+        # Print the response
+        if response.status_code == 200:
+            result = response.json().get("content", "")
+            return result.strip()
+        else:
+            print("Error:", response.status_code, response.text)
+            return ""
+
+    def run(self):
+        print("> Welcome to the Rag Assistant! Type '-q' to quit.")
+        while True:
+            # User input
+            user_input = input("> ").strip()
+            
+            # Check for quit condition
+            if user_input.strip().lower() == "-q":
+                print("> Exiting... Goodbye!")
+                break
+
+            # Skip empty queries
+            if not user_input:
+                print("> Please enter a valid query.")
+                continue
+            
+            # Check for a specific query
+            result = self.query(user_input)
+            print(result)
+            print("> Assistant:", result)
+
+    def serve(self):
+        # Fast app for serving
+        app = FastAPI()
+
+        @app.get("/api/search")
+        def search(q: str):
+            return {"result": self.vector_database.search(text=q)}
+            
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+
+        # Probably edit clean up to push container as well to save data
+        self.vector_database.clean_up()
 
 
 class Database:
@@ -67,9 +151,15 @@ class Database:
         except:
             print("already running")
     
+    def start_database(self, volume_path):
+        pass
+
+        
+    def push_database(self, volume_path, image_name):
+        pass
+    
     def search(self, text: str):
         points = self.qdrant_client.query(self.collection_name, query_text=text, limit=5)
-        print("<=== Retrieved documents ===>")
         context = ""
         for point in points:
             context += point.document+" "
@@ -103,7 +193,7 @@ class Converter:
     def __init__(self):
         self.doc_converter = DocumentConverter()
 
-    def convert(self, file_path="/mnt/c/Users/bmahabir/Desktop/pdfs"):
+    def convert(self, file_path):
         targets = []
 
         # Check if file_path is a directory or a file
@@ -213,32 +303,12 @@ LABEL {ociimage_rag}
     )
     return imageid
 
-
-
-
 def generate(args):
+    rag = Rag(args)
+    rag.add_files(file_path="/mnt/c/Users/bmahabir/Desktop/pdfs")
+    # select whether to use run or serve
+    rag.run()
 
-    vector_database = Database(args)
-    conv = Converter()
-    documents, metadata, ids = conv.convert()
-    vector_database.add(documents, metadata, ids)
-
-    # Propbably can create a seperate function
-    # for "run" capabilites in a while loop handling queries
-    # print(vector_database.search("Sol Clarity"))
-    # vector_database.clean_up()
-
-    # Fast app for serving
-    app = FastAPI()
-
-    @app.get("/api/search")
-    def search(q: str):
-        return {"result": vector_database.search(text=q)}
-        
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
-    # Probably edit clean up to push container as well to save data
-    vector_database.clean_up()
 
 ## TODO
 # Add functions to clear data base remove files and update files
