@@ -12,4 +12,4 @@ venv/
 *.container
 *.image
 *.volume
-ramalama/qdrant_storage
+qdrant_storage

@@ -18,10 +18,9 @@ from fastapi import FastAPI
 import uvicorn
 
 from docling.chunking import HybridChunker
-from docling.datamodel.base_models import ConversionStatus
-from docling.datamodel.document import ConversionResult
 from docling.document_converter import DocumentConverter
 
+# we also need fastembed
 from qdrant_client import QdrantClient
 
 
@@ -30,49 +29,146 @@ _log = logging.getLogger(__name__)
 ociimage_rag = "org.containers.type=ai.image.rag"
 
 DENSE_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-SPARSE_MODEL = "Qdrant/bm25"
+SPARSE_MODEL = "prithivida/Splade_PP_en_v1"
+LLM = ""
+AGENT_LLM = ""
 COLLECTION_NAME = "docs"
 
 TEMPLATE = """
 
     Here is the context to use to answer the question. Some of the context might not relate to the question.
-    If none of the context relates to the question dont use the context
+    If none of the context relates to the question answer the question without the context.
 
-    {context}
+    The context is, {context}
 
-    Now, review the user question and answer it:
+    Now, review the question and answer it:
 
-    {query}
+    The question is, {query}
+
+    Answer: 
+"""
+
+TEMPLATE_NO_CONTEXT = """
+    Now, review the prompt and answer it:
+
+    The prompt is, {query}
+"""
+
+TEMPLATE_Q = """
+Your task is to determine whether the given question can be answered based on the provided context. 
+
+Return 1 if the question can be answered with the context, and return 0 if it cannot.
+
+Context: {context}
+
+Question: {query}
+
+Answer: (0 or 1 ONLY)
 """
 
 class Rag:
     def __init__(self, args):
-        self.vector_database = Database(args)
-        self.conv = Converter()
         self.args = args
+
+        # These will eventually come from args
+        self.target = "qstorage:latest"
+        self.storage_file_path=os.path.dirname(os.getcwd())+"/ramalama"
+
+        # Always import files before starting Database class
+        # We need to mount the persistant volume before starting 
+        # the Qdrant container to avoid errors
+        self.import_files()
+
+        self.vector_database = Database(self.args)
+        self.conv = Converter()
+
+        self.llm_instance = "http://localhost:8080/completion"
+        self.agent_llm_instance = "http://localhost:8081/completion"
     
     def add_files(self, file_path):
-        documents, metadata, ids = self.conv.convert(file_path)
+        try:
+            documents, metadata, ids = self.conv.convert(file_path)
+        except:
+            print("Couldnt add files")
+            return "Couldnt add files"
         self.vector_database.add(documents, metadata, ids)
+        return "Added Files"
+    
+    def export_files(self):
+        self.vector_database.export_database(self.target)
 
-    def query(self, question) -> str:
-        # get context from data base and query rama llm for answer
+    def import_files(self):
+        # We have to run this command before starting the Database class
+        # to avoid errors with resetting the api connection
+        # start the container
+        try:
+            run_cmd(
+                    [self.args.engine, "run", "-d", "--name", "temp-container", self.target],
+                    debug=self.args.debug,
+                )
+        except:
+            print("no qdrant storage image available trying to pull...")
+            ## TODO
+            # Add code to pull from quay.io
+            print("Couldnt pull data")
+            return 
+        # copy the folder to the host
+        run_cmd(
+                [self.args.engine, "cp", "temp-container:/qdrant_storage", self.storage_file_path],
+                debug=self.args.debug,
+            )
+        # stop the container
+        run_cmd(
+                [self.args.engine, "stop", "temp-container"],
+                debug=self.args.debug,
+            )
+        # delete the container
+        run_cmd(
+                [self.args.engine, "rm", "temp-container"],
+                debug=self.args.debug,
+            )
+        print("Added files from qdrant persistant volume image")
+    
+    def push_files_to_cloud(self):
+        pass
 
-        # import serve command and run model from args
+    def kube(self):
+        pass
 
-        # Get query from database
-        context = self.vector_database.search(question)
+    def agentic_query(self, text):
+        # Doesnt work quite yet 
+        context = self.vector_database.search(text)
+        formatted_query = TEMPLATE_Q.format(context=context, query=text)
 
-        # Combine question and context
-        formatted_query = TEMPLATE.format(context=context, query=question)
+        answer = self.query_api(formatted_query, self.agent_llm_instance)
 
-        # Define the server endpoint
-        llm_instance = "http://localhost:8080/completion"
+        print("Done Querying")
+        print("ANSWER from agent:", answer)
+        print("Done")
 
+        if answer == "1":
+            formatted_query = TEMPLATE.format(context=context, query=text)
+        elif answer == "0":
+            formatted_query = TEMPLATE_NO_CONTEXT.format(query=text)
+        else:
+            print("unknown error occured")
+            return
+        result = self.query_api(formatted_query, self.llm_instance)
+        return result
+    
+    def query(self, text):
+        context = self.vector_database.search(text)
+        formatted_query = TEMPLATE.format(context=context, query=text)
+        result = self.query_api(formatted_query, self.llm_instance)
+        return result
+    
+    def query_api(self, formatted_query, llm_host) -> str:
         # Define the payload
         payload = {
-            "prompt": question,
-            "n_predict": 128
+            "prompt": formatted_query,
+            "n_predict": 20,
+            "no-warmup": "",
+            "stop": ["\n"]
         }
 
         # Define the headers
@@ -81,7 +177,7 @@ class Rag:
         }
 
         # Send the POST request
-        response = requests.post(llm_instance, json=payload, headers=headers)
+        response = requests.post(llm_host, json=payload, headers=headers)
 
         # Print the response
         if response.status_code == 200:
@@ -92,33 +188,38 @@ class Rag:
             return ""
 
     def run(self):
-        print("> Welcome to the Rag Assistant! Type '-q' to quit.")
-        while True:
-            # User input
-            user_input = input("> ").strip()
-            
-            # Check for quit condition
-            if user_input.strip().lower() == "-q":
-                print("> Exiting... Goodbye!")
-                break
+        print("> Welcome to the Rag Assistant!")
+        try:
+            while True:
+                # User input
+                user_input = input("> ").strip()
 
-            # Skip empty queries
-            if not user_input:
-                print("> Please enter a valid query.")
-                continue
-            
-            # Check for a specific query
-            result = self.query(user_input)
-            print(result)
-            print("> Assistant:", result)
+                # Skip empty queries
+                if not user_input:
+                    print("> Please enter a valid query.")
+                    continue
+                
+                # Check for a specific query
+                result = self.query(user_input)
+                print("> Assistant:", result)
+
+        except:
+            print("\n> Exiting... Goodbye!")  # Catch any Interrupts and exit gracefully
+            self.vector_database.clean_up()
 
     def serve(self):
         # Fast app for serving
         app = FastAPI()
 
         @app.get("/api/search")
-        def search(q: str):
-            return {"result": self.vector_database.search(text=q)}
+        def search(user_input: str):
+            result = self.query(user_input)
+            return {"result": result}
+        
+        @app.get("/api/add_files")
+        def add_files(file_path: str):
+            result = self.add_files(file_path)
+            return {"result": result}
             
         uvicorn.run(app, host="0.0.0.0", port=8000)
 
@@ -131,6 +232,7 @@ class Database:
 
         self.engine = args.engine
         self.debug = args.debug
+        self.volume_path = None
 
         self.init_database()
         self.collection_name = COLLECTION_NAME
@@ -141,52 +243,97 @@ class Database:
         # comment this line to use dense vectors only
         self.qdrant_client.set_sparse_model(SPARSE_MODEL)
 
-    def init_database(self, volume_path="/home/brian/ramalama/ramalama/qdrant_storage"):
-        os.makedirs(volume_path, exist_ok=True)
+        # names = self.qdrant_client.get_collections()
+        # print(names)
+
+
+    def init_database(self):
+        if self.volume_path is None:
+            self.volume_path = os.path.join(os.getcwd(), "qdrant_storage")
+            os.makedirs(self.volume_path, exist_ok=True)
         try:
             run_cmd(
-               [self.engine, "run", "-d", "--name", "qdrant_container", "-p", "6333:6333", "-v", volume_path+":/qdrant/storage", "docker.io/qdrant/qdrant"],
+               [self.engine, "run", "-d", "--name", "qdrant_container", "-p", "6333:6333", "-v", self.volume_path+":/qdrant/storage", "docker.io/qdrant/qdrant"],
                 debug=self.debug,
             )
         except:
-            print("already running")
+            self.start_database()
     
-    def start_database(self, volume_path):
+    def start_database(self):
+        run_cmd(
+               [self.engine, "start", "qdrant_container"],
+                debug=self.debug,
+            )
+        
+    def stop_database(self):
+        run_cmd(
+               [self.engine, "stop", "qdrant_container"],
+                debug=self.debug,
+            )
+    
+    def delete_database(self):
+        run_cmd(
+               [self.engine, "rm", "qdrant_container"],
+                debug=self.debug,
+            )
+        
+    def clear_database(self):
+        """Clear the Qdrant Vector Database"""
+        try:
+            self.qdrant_client.delete_collection(collection_name=self.collection_name)
+        except:
+            print("Database already cleared") 
+        
+    def push_database(self, volume_path="", image_name=""):
+        # push the database image to the cloud
         pass
 
-        
-    def push_database(self, volume_path, image_name):
-        pass
+    def export_database(self, target):
+        print(self.volume_path)
+        print(f"Building {target}...")
+        contextdir = os.path.dirname(os.getcwd())
+        containerfile = tempfile.NamedTemporaryFile(prefix='RamaLama_Containerfile_', delete=True)
+        # Open the file for writing.
+        with open(containerfile.name, 'w') as c:
+            c.write(
+                f"""\
+    FROM registry.access.redhat.com/ubi9/ubi-micro:9.4-15
+    COPY ramalama/qdrant_storage/ /qdrant_storage/
+    LABEL {ociimage_rag}
+    """
+            )
+        imageid = (
+            run_cmd(
+                [self.engine, "build", "-t", target, "--no-cache", "-q", "-f", containerfile.name, contextdir],
+                debug=self.debug,
+            )
+            .stdout.decode("utf-8")
+            .strip()
+        )
+        return imageid
     
-    def search(self, text: str):
-        points = self.qdrant_client.query(self.collection_name, query_text=text, limit=5)
+    def search(self, text: str, limit=5):
+        points = self.qdrant_client.query(self.collection_name, query_text=text, limit=limit)
         context = ""
         for point in points:
-            context += point.document+" "
-        return context
+            context += point.document + " "
+        return context.strip()
     
     def add(self, documents, metadatas, ids):
          ids = self.qdrant_client.add(self.collection_name, documents=documents, metadata=metadatas, ids=ids, batch_size=64)
-
-    def clear(self):
-        """Clear the Qdrant Vector Database"""
-        self.qdrant_client.delete_collection(collection_name=self.collection_name)
 
     def info(self):
         info = self.qdrant_client.get_collection(self.collection_name)
         print(info.points_count,"\n")
 
-    def clean_up(self, volume_path="/home/brian/ramalama/ramalama/qdrant_storage"):
-        shutil.rmtree(volume_path)
-        run_cmd(
-               [self.engine, "stop", "qdrant_container"],
-                debug=self.debug,
-            )
-        run_cmd(
-               [self.engine, "rm", "qdrant_container"],
-                debug=self.debug,
-            )
-
+    def clean_up(self):
+        print("cleaning up database")
+        if self.volume_path == None:
+            print("No Database Volume")
+        else:
+            shutil.rmtree(self.volume_path)
+        self.stop_database()
+        self.delete_database()
 
 class Converter:
     """A Class desgined to handle all document conversions"""
@@ -201,6 +348,10 @@ class Converter:
             targets.extend(self.walk(file_path))  # Walk directory and process all files
         elif os.path.isfile(file_path):
             targets.append(file_path)  # Process the single file
+        else:
+            # if the path provided is wrong just return false
+            # Used in Rag.add files to avoid errors
+            return False
 
         result = self.doc_converter.convert_all(targets)
 
@@ -241,82 +392,23 @@ class Converter:
         return str(uuid.UUID(sha256_hash[:32]))
 
 
-
-def export_documents(
-    conv_results: Iterable[ConversionResult],
-    output_dir: Path,
-):
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    success_count = 0
-    failure_count = 0
-    partial_success_count = 0
-
-    for conv_res in conv_results:
-        if conv_res.status == ConversionStatus.SUCCESS:
-            success_count += 1
-            doc_filename = conv_res.input.file.stem
-
-            # Export Docling document format to JSON:
-            with (output_dir / f"{doc_filename}.json").open("w") as fp:
-                fp.write(json.dumps(conv_res.document.export_to_dict()))
-
-        elif conv_res.status == ConversionStatus.PARTIAL_SUCCESS:
-            _log.info(f"Document {conv_res.input.file} was partially converted with the following errors:")
-            for item in conv_res.errors:
-                _log.info(f"\t{item.error_message}")
-            partial_success_count += 1
-        else:
-            _log.info(f"Document {conv_res.input.file} failed to convert.")
-            failure_count += 1
-
-    _log.info(
-        f"Processed {success_count + partial_success_count + failure_count} docs, "
-        f"of which {failure_count} failed "
-        f"and {partial_success_count} were partially converted."
-    )
-    return success_count, partial_success_count, failure_count
-
-
-def build(source, target, args):
-    print(f"Building {target}...")
-    src = os.path.realpath(source)
-    contextdir = os.path.dirname(src)
-    model = os.path.basename(src)
-    containerfile = tempfile.NamedTemporaryFile(prefix='RamaLama_Containerfile_', delete=True)
-    # Open the file for writing.
-    with open(containerfile.name, 'w') as c:
-        c.write(
-            f"""\
-FROM scratch
-COPY {model} /
-LABEL {ociimage_rag}
-"""
-        )
-    imageid = (
-        run_cmd(
-            [args.engine, "build", "-t", target, "--no-cache", "-q", "-f", containerfile.name, contextdir],
-            debug=args.debug,
-        )
-        .stdout.decode("utf-8")
-        .strip()
-    )
-    return imageid
-
 def generate(args):
+
+    print(args)
+    # Start a ramalama serve instance given the model name
+
+    # in rag.add_files file_path should be the args.PATH
+    
     rag = Rag(args)
     rag.add_files(file_path="/mnt/c/Users/bmahabir/Desktop/pdfs")
+    # rag.export_files()
+
     # select whether to use run or serve
+    # serve will be used for kube play
     rag.run()
 
 
 ## TODO
-# Add functions to clear data base remove files and update files
-# Add a template so that the ai knows not to use the context if it doesnt pertain to the questions
-# On that note add the ability to further inspect scores and context so the context relates properly to the question
-# Fix how docling chunks data so that in properly incorporates data
-# if for example a chunk in a data is really high give more of that data
-# Add the ability for more verbose rag with more context
 
-# Add the ability to run locally or using kube play (VERY IMPORTANT)
-# Add fastapi for kube play
+# Add the ability to call ramalama serve to start instance
+# Add kube play ability
