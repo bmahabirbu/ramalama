@@ -11,7 +11,6 @@ import shutil
 import requests
 
 from ramalama.common import run_cmd
-from ramalama.model import Model
 
 # New imports
 from fastapi import FastAPI
@@ -69,6 +68,10 @@ Answer: (0 or 1 ONLY)
 class Rag:
     def __init__(self, args):
         self.args = args
+
+        model = New(args.MODEL, args)
+        model.serve(args)
+
 
         # These will eventually come from args
         self.target = "qstorage:latest"
