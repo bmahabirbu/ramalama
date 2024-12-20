@@ -1,0 +1,25 @@
+# Use Fedora 40 as the base image
+FROM fedora:40
+
+# Install required dependencies
+RUN dnf update -y && \
+    dnf install -y git python3 podman python3-pip && \
+    dnf clean all
+
+# Set up Python environment
+RUN pip3 install --no-cache-dir \
+    fastapi \
+    uvicorn \
+    requests \
+    qdrant-client \
+    docling \
+    fastembed
+
+# Create directories for the application
+WORKDIR /app
+
+# Copy the target script
+COPY ../ramalama/ramalama/rag.py /app/rag.py
+
+# Set the entrypoint to run the script
+CMD ["python3", "rag.py"]
