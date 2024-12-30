@@ -22,13 +22,13 @@ from fastapi import FastAPI
 import uvicorn
 
 # we also need fastembed
-from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient, models
 
 from typing import Iterator
 
 from docling.document_converter import DocumentConverter
 from docling.chunking import HybridChunker
-from docling.document_converter import DocumentConverter
+from langchain_core.documents import Document
 
 from langchain_core.document_loaders import BaseLoader
 from langchain_core.documents import Document as LCDocument
@@ -288,12 +288,15 @@ class Database:
             os.makedirs(self.volume_path, exist_ok=True)
         try:
             run_cmd(
-                [self.engine, "run", "-d", "--name", "qdrant_container", "-p", "6333:6333", "-v", self.volume_path + ":/qdrant/storage", "docker.io/qdrant/qdrant"],
+                [self.engine, "run", "-d", "--name", "qdrant_container", "-p", "6333:6333", "-v", self.volume_path + ":/qdrant/snapshots", "docker.io/qdrant/qdrant"],
                 debug=self.debug,
             )
         except Exception as e:
             _log.warning(f"Failed to initialize database container: {e}")
             self.start_database()
+
+    def get_client(self):
+        return self.qdrant_client
     
     def start_database(self):
         run_cmd(
@@ -418,22 +421,23 @@ class Converter:
 
         result = self.doc_converter.convert_all(targets)
 
-        documents, metadatas, ids = [], [], []
+        documents = []
+        ids = []
         for file in result:
             # Chunk the document using HybridChunker
-            for chunk in HybridChunker(tokenizer=DENSE_MODEL, max_tokens=64).chunk(dl_doc=file.document):
+            for chunk in HybridChunker(tokenizer=DENSE_MODEL, max_tokens=1000).chunk(dl_doc=file.document):
                 # Extract the text and metadata from the chunk
-                doc_text = chunk.text
-                doc_meta = chunk.meta.export_json_dict() 
+                document = Document(
+                    page_content=chunk.text,
+                    metadata=chunk.meta.export_json_dict(),
+                )
 
-                # Append to respective lists
-                documents.append(doc_text)
-                metadatas.append(doc_meta)
+                # Append
+                documents.append(document)
                 
                 # Generate unique ID for the chunk
-                doc_id = self.generate_hash(doc_text)
-                ids.append(doc_id)
-        return documents, metadatas, ids
+                ids.append(chunk.meta.origin.binary_hash)
+        return documents, ids
 
     def walk(self, path):
         targets = []
@@ -508,11 +512,14 @@ def run_cmd(args, cwd=None, stdout=subprocess.PIPE, ignore_stderr=False, debug=F
 #     rag.configure_database()
 #     rag.run()
 
-def import_files(args, target, storage_file_path):
+def import_files(args, target, storage_file_path=None):
     """
     Imports files from a Qdrant persistent volume image by running a container, 
     copying data to the host, and cleaning up the container.
     """
+
+    if storage_file_path == None:
+        storage_file_path = os.path.dirname(os.getcwd())
 
     container_name = "temp-container"
     
@@ -609,7 +616,6 @@ FILE_PATH = "/mnt/c/Users/bmahabir/Desktop/pdfs"  # DocLayNet paper
 # Load and split documents
 loader = DoclingPDFLoader(file_path=FILE_PATH)
 
-# We can use Docling Hierarchacly Chunker
 chunker = RecursiveCharacterTextSplitter(
     chunk_size=1000,
     chunk_overlap=200,
@@ -628,18 +634,50 @@ args = Namespace(
     PATH=['/home/brian/ramalama/qdrant_storage'],
     IMAGE='qstorage:latest',
 )
+
+import_files(args, "qs")
+
 database = Database(args)
 database.configure_database()
 database.init_database()
 
-# Set up Qdrant for vector storage
+client = database.get_client()
+
+# # restore data
+snapshot_directory = "/home/brian/ramalama/qdrant_storage/docs"
+# List all files in the directory
+snapshot_files = [f for f in os.listdir(snapshot_directory) if f.endswith(".snapshot")]
+
+# Check if there are any snapshot files
+if snapshot_files:
+    # Select the first snapshot file
+    snapshot_file = snapshot_files[0]
+    snapshot_file_path = f"file:///qdrant/snapshots/docs/{snapshot_file}"
+    
+    # Recover the snapshot
+    client.recover_snapshot(COLLECTION_NAME, snapshot_file_path)
+    print(f"Snapshot {snapshot_file} has been successfully recovered.")
+else:
+    print("No snapshot files found in the directory.")
+# We can also do this may be useful for kube
+
+# curl -X POST \
+#   'http://localhost:6333/collections/docs/snapshots/upload?priority=snapshot' \
+#   -H 'api-key: my-api-key' \
+#   -H 'Content-Type: multipart/form-data' \
+#   -F 'snapshot=@/home/brian/ramalama/ramalama/docs-4959314178120938-2024-12-30-07-06-08.snapshot'
+
+# # Set up Qdrant for vector storage
 QDRANT_URI = "http://localhost:6333"  # Assuming a local Qdrant instance
+
 vectorstore = Qdrant.from_documents(
-    splits,
+    docs,
     embeddings,
     url=QDRANT_URI,
-    collection_name="docling_collection",
+    collection_name=COLLECTION_NAME,
 )
+
+# Add files
 
 # Use Local AI for the LLM
 llm = ChatOpenAI(temperature=0.5,
@@ -667,10 +705,17 @@ rag_chain = (
     | StrOutputParser()
 )
 
-# call rag chain with input and stream output
-for chunk in rag_chain.stream("What projects did Brian do?"):
-     print(chunk, end="", flush=True)
+# call rag chain with input and stream output (interrupt to close cleanly)
+try:
+    for chunk in rag_chain.stream("Give me all the projects Brian worked"):
+        print(chunk, end="", flush=True)
+except KeyboardInterrupt:
+    print("\nStream interrupted.")
 print(" ")
+
+# client = database.get_client()
+# client.create_snapshot(collection_name=COLLECTION_NAME)
+# print(client.list_snapshots(collection_name=COLLECTION_NAME))
 
 database.export_database("qs")
 database.clean_up()
