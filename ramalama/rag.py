@@ -17,301 +17,250 @@ from argparse import Namespace
 
 from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 
-# from ramalama.common import run_cmd
-
 # New imports
 from fastapi import FastAPI
 import uvicorn
 
-from docling.chunking import HybridChunker
-from docling.document_converter import DocumentConverter
-
 # we also need fastembed
 from qdrant_client import QdrantClient
 
-
 from typing import Iterator
 
+from docling.document_converter import DocumentConverter
+from docling.chunking import HybridChunker
+from docling.document_converter import DocumentConverter
+
 from langchain_core.document_loaders import BaseLoader
 from langchain_core.documents import Document as LCDocument
-
 from langchain_openai.chat_models import ChatOpenAI
 
-# llm = ChatOpenAI(temperature=0.5,
-#                 max_tokens=None,
-#                 openai_api_base="http://localhost:8080", 
-#                 openai_api_key="ed")
-
-# for chunk in llm.stream("summarize the last unicorn quickly"):
-#     print(chunk.content, end="", flush=True)
-
-
-from docling.document_converter import DocumentConverter
-
-from langchain_core.document_loaders import BaseLoader
-from langchain_core.documents import Document as LCDocument
-from docling.document_converter import DocumentConverter
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_qdrant import Qdrant
 from langchain_core.output_parsers import StrOutputParser
+
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
-from typing import Iterable
 
 _log = logging.getLogger(__name__)
 
 ociimage_rag = "org.containers.type=ai.image.rag"
 
 DENSE_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-SPARSE_MODEL = "prithivida/Splade_PP_en_v1"
 LLM = ""
-AGENT_LLM = ""
 COLLECTION_NAME = "docs"
 
-# TEMPLATE = """
+class Rag:
+    def __init__(self, args):
+        self.args = args
 
-#     Here is the context to use to answer the question. Some of the context might not relate to the question.
-#     If none of the context relates to the question answer the question without the context.
+        logging.basicConfig(level=logging.DEBUG if self.args.debug else logging.ERROR)
 
-#     The context is, {context}
+        # These will eventually come from args
+        self.target = self.args.IMAGE
+        self.storage_file_path = os.path.dirname(os.getcwd()) + "/ramalama"
 
-#     Now, review the question and answer it:
+        # Always import files before starting Database class
+        # We need to mount the persistant volume before starting 
+        # the Qdrant container to avoid errors
 
-#     The question is, {query}
+        self.import_files()
 
-#     Answer: 
-# """
+        self.vector_database = Database(self.args)
+        self.conv = Converter()
 
-# TEMPLATE_NO_CONTEXT = """
-#     Now, review the prompt and answer it:
-
-#     The prompt is, {query}
-# """
-
-# TEMPLATE_Q = """
-# Your task is to determine whether the given question can be answered based on the provided context. 
-
-# Return 1 if the question can be answered with the context, and return 0 if it cannot.
-
-# Context: {context}
-
-# Question: {query}
-
-# Answer: (0 or 1 ONLY)
-# """
-
-# class Rag:
-#     def __init__(self, args):
-#         self.args = args
-
-#         logging.basicConfig(level=logging.DEBUG if self.args.debug else logging.ERROR)
-
-#         # These will eventually come from args
-#         self.target = self.args.IMAGE
-#         self.storage_file_path = os.path.dirname(os.getcwd()) + "/ramalama"
-
-#         # Always import files before starting Database class
-#         # We need to mount the persistant volume before starting 
-#         # the Qdrant container to avoid errors
-
-#         self.import_files()
-
-#         self.vector_database = Database(self.args)
-#         self.conv = Converter()
-
-#         self.llm_instance = "http://localhost:8080/completion"
-#         self.agent_llm_instance = "http://localhost:8081/completion"
+        self.llm_instance = "http://localhost:8080/completion"
+        self.agent_llm_instance = "http://localhost:8081/completion"
     
-#     def init_database(self):
-#         self.vector_database.init_database()
+    def init_database(self):
+        self.vector_database.init_database()
     
-#     def configure_database(self):
-#         self.vector_database.configure_database()
+    def configure_database(self):
+        self.vector_database.configure_database()
     
-#     def add_files(self, file_path):
-#         try:
-#             documents, metadata, ids = self.conv.convert(file_path)
-#         except Exception as e:
-#             _log.error(f"Couldn't add files: {e}")
-#             return "Couldn't add files"
-#         self.vector_database.add(documents, metadata, ids)
-#         return "Added Files"
+    def add_files(self, file_path):
+        try:
+            documents, metadata, ids = self.conv.convert(file_path)
+        except Exception as e:
+            _log.error(f"Couldn't add files: {e}")
+            return "Couldn't add files"
+        self.vector_database.add(documents, metadata, ids)
+        return "Added Files"
     
-#     def clean_up(self):
-#         self.vector_database.clean_up()
+    def clean_up(self):
+        self.vector_database.clean_up()
     
-#     def export_files(self):
-#         self.vector_database.export_database(self.target)
+    def export_files(self):
+        self.vector_database.export_database(self.target)
 
-#     def import_files(self):
-#         """
-#         Imports files from a Qdrant persistent volume image by running a container, 
-#         copying data to the host, and cleaning up the container.
-#         """
+    def import_files(self):
+        """
+        Imports files from a Qdrant persistent volume image by running a container, 
+        copying data to the host, and cleaning up the container.
+        """
 
-#         container_name = "temp-container"
+        container_name = "temp-container"
         
-#         try:
-#             # Step 1: Start the container
-#             try:
-#                 run_cmd(
-#                     [self.args.engine, "run", "-d", "--name", container_name, self.target],
-#                     debug=self.args.debug,
-#                 )
-#                 _log.info(f"Container '{container_name}' started successfully.")
-#             except CalledProcessError as e:
-#                 _log.warning("No Qdrant storage image available, attempting to pull...")
-#                 try:
-#                     run_cmd(
-#                         [self.args.engine, "pull", self.target],
-#                         debug=self.args.debug,
-#                     )
-#                     _log.info("Successfully pulled storage image.")
-#                     run_cmd(
-#                         [self.args.engine, "run", "-d", "--name", container_name, self.target],
-#                         debug=self.args.debug,
-#                     )
-#                 except CalledProcessError as pull_error:
-#                     _log.error("Failed to pull storage image.")
-#                     _log.error(pull_error)
-#                     return
+        try:
+            # Step 1: Start the container
+            try:
+                run_cmd(
+                    [self.args.engine, "run", "-d", "--name", container_name, self.target],
+                    debug=self.args.debug,
+                )
+                _log.info(f"Container '{container_name}' started successfully.")
+            except CalledProcessError as e:
+                _log.warning("No Qdrant storage image available, attempting to pull...")
+                try:
+                    run_cmd(
+                        [self.args.engine, "pull", self.target],
+                        debug=self.args.debug,
+                    )
+                    _log.info("Successfully pulled storage image.")
+                    run_cmd(
+                        [self.args.engine, "run", "-d", "--name", container_name, self.target],
+                        debug=self.args.debug,
+                    )
+                except CalledProcessError as pull_error:
+                    _log.error("Failed to pull storage image.")
+                    _log.error(pull_error)
+                    return
 
-#             # Step 2: Copy the folder to the host
-#             try:
-#                 run_cmd(
-#                     [
-#                         self.args.engine,
-#                         "cp",
-#                         f"{container_name}:/qdrant_storage",
-#                         self.storage_file_path,
-#                     ],
-#                     debug=self.args.debug,
-#                 )
-#                 _log.info("Data copied successfully from container to host.")
-#             except CalledProcessError as copy_error:
-#                 _log.error("Failed to copy data from container to host.")
-#                 _log.error(copy_error)
-#                 return
+            # Step 2: Copy the folder to the host
+            try:
+                run_cmd(
+                    [
+                        self.args.engine,
+                        "cp",
+                        f"{container_name}:/qdrant_storage",
+                        self.storage_file_path,
+                    ],
+                    debug=self.args.debug,
+                )
+                _log.info("Data copied successfully from container to host.")
+            except CalledProcessError as copy_error:
+                _log.error("Failed to copy data from container to host.")
+                _log.error(copy_error)
+                return
 
-#         finally:
-#             # Step 3: Stop and remove the container
-#             try:
-#                 run_cmd(
-#                     [self.args.engine, "stop", container_name],
-#                     debug=self.args.debug,
-#                 )
-#                 _log.info(f"Container '{container_name}' stopped.")
-#             except CalledProcessError:
-#                 _log.warning(f"Container '{container_name}' might already be stopped.")
+        finally:
+            # Step 3: Stop and remove the container
+            try:
+                run_cmd(
+                    [self.args.engine, "stop", container_name],
+                    debug=self.args.debug,
+                )
+                _log.info(f"Container '{container_name}' stopped.")
+            except CalledProcessError:
+                _log.warning(f"Container '{container_name}' might already be stopped.")
 
-#             try:
-#                 run_cmd(
-#                     [self.args.engine, "rm", container_name],
-#                     debug=self.args.debug,
-#                 )
-#                 _log.info(f"Container '{container_name}' removed.")
-#             except CalledProcessError:
-#                 _log.warning(f"Container '{container_name}' might already be removed.")
+            try:
+                run_cmd(
+                    [self.args.engine, "rm", container_name],
+                    debug=self.args.debug,
+                )
+                _log.info(f"Container '{container_name}' removed.")
+            except CalledProcessError:
+                _log.warning(f"Container '{container_name}' might already be removed.")
 
-#         _log.info("Successfully added files from Qdrant persistent volume image.")
+        _log.info("Successfully added files from Qdrant persistent volume image.")
     
-#     def push_files_to_cloud(self):
-#         pass
+    def push_files_to_cloud(self):
+        pass
 
-#     def kube(self):
-#         pass
+    def kube(self):
+        pass
 
-#     def agentic_query(self, text):
-#         # Doesn't work quite yet 
-#         context = self.query_database(text)
-#         formatted_query = TEMPLATE_Q.format(context=context, query=text)
+    def agentic_query(self, text):
+        # Doesn't work quite yet 
+        context = self.query_database(text)
+        formatted_query = TEMPLATE_Q.format(context=context, query=text)
 
-#         answer = self.query_api(formatted_query, self.agent_llm_instance)
+        answer = self.query_api(formatted_query, self.agent_llm_instance)
 
-#         _log.debug("ANSWER from agent: %s", answer)
+        _log.debug("ANSWER from agent: %s", answer)
 
-#         if answer == "1":
-#             formatted_query = TEMPLATE.format(context=context, query=text)
-#         elif answer == "0":
-#             formatted_query = TEMPLATE_NO_CONTEXT.format(query=text)
-#         else:
-#             _log.error("Unknown error occurred")
-#             return
-#         result = self.query_api(formatted_query, self.llm_instance)
-#         return result
+        if answer == "1":
+            formatted_query = TEMPLATE.format(context=context, query=text)
+        elif answer == "0":
+            formatted_query = TEMPLATE_NO_CONTEXT.format(query=text)
+        else:
+            _log.error("Unknown error occurred")
+            return
+        result = self.query_api(formatted_query, self.llm_instance)
+        return result
     
-#     def query(self, text):
-#         context = self.query_database(text)
-#         formatted_query = TEMPLATE.format(context=context, query=text)
-#         result = self.query_api(formatted_query, self.llm_instance)
-#         return result
+    def query(self, text):
+        context = self.query_database(text)
+        formatted_query = TEMPLATE.format(context=context, query=text)
+        result = self.query_api(formatted_query, self.llm_instance)
+        return result
     
-#     def query_database(self, text):
-#         return self.vector_database.search(text)
+    def query_database(self, text):
+        return self.vector_database.search(text)
     
-#     def query_api(self, formatted_query, llm_host) -> str:
-#         # Define the payload
-#         payload = {
-#             "prompt": formatted_query,
-#             "n_predict": 20,
-#             "no-warmup": "",
-#             "stop": ["\n"]
-#         }
+    def query_api(self, formatted_query, llm_host) -> str:
+        # Define the payload
+        payload = {
+            "prompt": formatted_query,
+            "n_predict": 20,
+            "no-warmup": "",
+            "stop": ["\n"]
+        }
 
-#         # Define the headers
-#         headers = {
-#             "Content-Type": "application/json"
-#         }
+        # Define the headers
+        headers = {
+            "Content-Type": "application/json"
+        }
 
-#         # Send the POST request
-#         response = requests.post(llm_host, json=payload, headers=headers)
+        # Send the POST request
+        response = requests.post(llm_host, json=payload, headers=headers)
 
-#         # Log the response
-#         if response.status_code == 200:
-#             result = response.json().get("content", "")
-#             return result.strip()
-#         else:
-#             _log.error("Error: %s %s", response.status_code, response.text)
-#             return ""
+        # Log the response
+        if response.status_code == 200:
+            result = response.json().get("content", "")
+            return result.strip()
+        else:
+            _log.error("Error: %s %s", response.status_code, response.text)
+            return ""
 
-#     def run(self):
-#         print("> Welcome to the Rag Assistant!")
-#         try:
-#             while True:
-#                 # User input
-#                 user_input = input("> ").strip()
+    def run(self):
+        print("> Welcome to the Rag Assistant!")
+        try:
+            while True:
+                # User input
+                user_input = input("> ").strip()
 
-#                 # Skip empty queries
-#                 if not user_input:
-#                     print("> Please enter a valid query.")
-#                     continue
+                # Skip empty queries
+                if not user_input:
+                    print("> Please enter a valid query.")
+                    continue
                 
-#                 # Check for a specific query
-#                 result = self.query(user_input)
-#                 print("> Assistant: %s", result)
+                # Check for a specific query
+                result = self.query(user_input)
+                print("> Assistant: %s", result)
 
-#         except KeyboardInterrupt:
-#             print("\n> Exiting... Goodbye!")  # Catch any Interrupts and exit gracefully
-#             # self.clean_up()
+        except KeyboardInterrupt:
+            print("\n> Exiting... Goodbye!")  # Catch any Interrupts and exit gracefully
+            # self.clean_up()
 
-#     def serve(self):
-#         # FastAPI app for serving
-#         app = FastAPI()
+    def serve(self):
+        # FastAPI app for serving
+        app = FastAPI()
 
-#         @app.get("/api/search")
-#         def search(user_input: str):
-#             result = self.query(user_input)
-#             return {"result": result}
+        @app.get("/api/search")
+        def search(user_input: str):
+            result = self.query(user_input)
+            return {"result": result}
         
-#         @app.get("/api/add_files")
-#         def add_files(file_path: str):
-#             result = self.add_files(file_path)
-#             return {"result": result}
+        @app.get("/api/add_files")
+        def add_files(file_path: str):
+            result = self.add_files(file_path)
+            return {"result": result}
             
-#         uvicorn.run(app, host="0.0.0.0", port=8000)
+        uvicorn.run(app, host="0.0.0.0", port=8000)
 
-#         # Probably edit clean up to push container as well to save data
-#         self.vector_database.clean_up()
+        # Probably edit clean up to push container as well to save data
+        self.vector_database.clean_up()
 
 
 class Database:
@@ -328,7 +277,7 @@ class Database:
         self.qdrant_client = QdrantClient("http://localhost:6333")
         self.qdrant_client.set_model(DENSE_MODEL)
         # comment this line to use dense vectors only
-        self.qdrant_client.set_sparse_model(SPARSE_MODEL)
+        # self.qdrant_client.set_sparse_model(SPARSE_MODEL)
 
     def init_database(self):
         print(self.volume_path)
@@ -449,60 +398,60 @@ class Database:
         self.delete_database()
 
 
-# class Converter:
-#     """A Class designed to handle all document conversions"""
-#     def __init__(self):
-#         self.doc_converter = DocumentConverter()
+class Converter:
+    """A Class designed to handle all document conversions"""
+    def __init__(self):
+        self.doc_converter = DocumentConverter()
 
-#     def convert(self, file_path):
-#         targets = []
-#         _log.info(f"Converting files from path: {file_path}")
+    def convert(self, file_path):
+        targets = []
+        _log.info(f"Converting files from path: {file_path}")
 
-#         # Check if file_path is a directory or a file
-#         if os.path.isdir(file_path):
-#             targets.extend(self.walk(file_path))  # Walk directory and process all files
-#         elif os.path.isfile(file_path):
-#             targets.append(file_path)  # Process the single file
-#         else:
-#             _log.error("Invalid file path provided")
-#             return False
+        # Check if file_path is a directory or a file
+        if os.path.isdir(file_path):
+            targets.extend(self.walk(file_path))  # Walk directory and process all files
+        elif os.path.isfile(file_path):
+            targets.append(file_path)  # Process the single file
+        else:
+            _log.error("Invalid file path provided")
+            return False
 
-#         result = self.doc_converter.convert_all(targets)
+        result = self.doc_converter.convert_all(targets)
 
-#         documents, metadatas, ids = [], [], []
-#         for file in result:
-#             # Chunk the document using HybridChunker
-#             for chunk in HybridChunker(tokenizer=DENSE_MODEL, max_tokens=64).chunk(dl_doc=file.document):
-#                 # Extract the text and metadata from the chunk
-#                 doc_text = chunk.text
-#                 doc_meta = chunk.meta.export_json_dict() 
+        documents, metadatas, ids = [], [], []
+        for file in result:
+            # Chunk the document using HybridChunker
+            for chunk in HybridChunker(tokenizer=DENSE_MODEL, max_tokens=64).chunk(dl_doc=file.document):
+                # Extract the text and metadata from the chunk
+                doc_text = chunk.text
+                doc_meta = chunk.meta.export_json_dict() 
 
-#                 # Append to respective lists
-#                 documents.append(doc_text)
-#                 metadatas.append(doc_meta)
+                # Append to respective lists
+                documents.append(doc_text)
+                metadatas.append(doc_meta)
                 
-#                 # Generate unique ID for the chunk
-#                 doc_id = self.generate_hash(doc_text)
-#                 ids.append(doc_id)
-#         return documents, metadatas, ids
+                # Generate unique ID for the chunk
+                doc_id = self.generate_hash(doc_text)
+                ids.append(doc_id)
+        return documents, metadatas, ids
 
-#     def walk(self, path):
-#         targets = []
-#         for root, dirs, files in os.walk(path, topdown=True):
-#             if len(files) == 0:
-#                 continue
-#             for f in files:
-#                 file = os.path.join(root, f)
-#                 if os.path.isfile(file):
-#                     targets.append(file)
-#         return targets
+    def walk(self, path):
+        targets = []
+        for root, dirs, files in os.walk(path, topdown=True):
+            if len(files) == 0:
+                continue
+            for f in files:
+                file = os.path.join(root, f)
+                if os.path.isfile(file):
+                    targets.append(file)
+        return targets
     
-#     def generate_hash(self, document: str) -> str:
-#         """Generate a unique hash for a document."""
-#         # Generate SHA256 hash of the document text
-#         sha256_hash = hashlib.sha256(document.encode('utf-8')).hexdigest()
-#         # Use the first 32 characters of the hash to create a UUID
-#         return str(uuid.UUID(sha256_hash[:32]))
+    def generate_hash(self, document: str) -> str:
+        """Generate a unique hash for a document."""
+        # Generate SHA256 hash of the document text
+        sha256_hash = hashlib.sha256(document.encode('utf-8')).hexdigest()
+        # Use the first 32 characters of the hash to create a UUID
+        return str(uuid.UUID(sha256_hash[:32]))
 
 
 # def generate(args):
@@ -660,6 +609,7 @@ FILE_PATH = "/mnt/c/Users/bmahabir/Desktop/pdfs"  # DocLayNet paper
 # Load and split documents
 loader = DoclingPDFLoader(file_path=FILE_PATH)
 
+# We can use Docling Hierarchacly Chunker
 chunker = RecursiveCharacterTextSplitter(
     chunk_size=1000,
     chunk_overlap=200,
@@ -701,6 +651,7 @@ llm = ChatOpenAI(temperature=0.5,
 def format_docs(docs: Iterable[LCDocument]):
     return "\n\n".join(doc.page_content for doc in docs)
 
+# Setup database as part of the pipeline
 retriever = vectorstore.as_retriever()
 
 # Set up prompt
@@ -716,7 +667,8 @@ rag_chain = (
     | StrOutputParser()
 )
 
-for chunk in rag_chain.stream("Where does Brian Live?"):
+# call rag chain with input and stream output
+for chunk in rag_chain.stream("What projects did Brian do?"):
      print(chunk, end="", flush=True)
 print(" ")
 
