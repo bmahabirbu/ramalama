@@ -243,7 +243,7 @@ class Database:
     def __init__(self, args):
         self.engine = args.engine
         self.debug = args.debug
-        self.volume_path = args.PATH[0]
+        self.volume_path = None
 
         self.url = QDRANT_URL
 
@@ -256,12 +256,14 @@ class Database:
         # Configure embedding model
         self.embeddings = FastEmbedEmbeddings()
 
-        print(self.volume_path)
         if self.volume_path is None:
             self.volume_path = os.path.join(os.path.dirname(os.getcwd()), "qdrant_storage")
             os.makedirs(self.volume_path, exist_ok=True)
         else:
             os.makedirs(self.volume_path, exist_ok=True)
+            
+        print(self.volume_path)
+
         try:
             run_cmd(
                 [self.engine, "run", "-d", "--name", "qdrant_container", "-p", "6333:6333", "-v", self.volume_path + ":/qdrant/snapshots", "docker.io/qdrant/qdrant"],
@@ -585,6 +587,9 @@ def generate(args):
     # FILE_PATH = "/mnt/c/Users/bmahabir/Desktop/pdfs" 
     _log.info("Generating Rag instance...")
     _log.debug(f"Args provided: {args}")
+
+    print(args.PATH[0])
+    print(args.IMAGE)
     
     rag = Rag(args)
     rag.add_files(file_path=args.PATH[0])
@@ -604,19 +609,19 @@ if __name__ == "__main__":
     args = Namespace(
         debug=False,
         engine='podman',
-        PATH=['/home/brian/ramalama/qdrant_storage'],
+        PATH=[''],
         IMAGE='qs',
     )
     rag = Rag(args)
 
-    rag.restore()
-    # rag.add_files(FILE_PATH)
+    # rag.restore()
+    rag.add_files(FILE_PATH)
 
     # rag.chain_from_scratch("what is brians email")
 
-    rag.create_chain()
-    rag.run()
+    # rag.create_chain()
+    # rag.run()
 
-    # rag.export_files()
+    rag.export_files()
 
-    # rag.clean_up()
+    rag.clean_up()
