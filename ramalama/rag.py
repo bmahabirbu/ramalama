@@ -8,6 +8,8 @@ from subprocess import CalledProcessError
 from pathlib import Path
 from typing import Iterable
 
+import time
+
 import hashlib
 import uuid
 import shutil
@@ -23,6 +25,7 @@ import uvicorn
 
 # we also need fastembed
 from qdrant_client import QdrantClient, models
+from qdrant_client.http.models import Distance, VectorParams
 
 from typing import Iterator
 
@@ -36,6 +39,7 @@ from langchain_openai.chat_models import ChatOpenAI
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_qdrant import Qdrant
+from langchain_qdrant import QdrantVectorStore
 from langchain_core.output_parsers import StrOutputParser
 
 from langchain_core.prompts import PromptTemplate
@@ -45,6 +49,7 @@ _log = logging.getLogger(__name__)
 
 ociimage_rag = "org.containers.type=ai.image.rag"
 
+QDRANT_URL = "http://localhost:6333"
 DENSE_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 LLM = ""
 COLLECTION_NAME = "docs"
@@ -55,173 +60,140 @@ class Rag:
 
         logging.basicConfig(level=logging.DEBUG if self.args.debug else logging.ERROR)
 
-        # These will eventually come from args
         self.target = self.args.IMAGE
-        self.storage_file_path = os.path.dirname(os.getcwd()) + "/ramalama"
 
-        # Always import files before starting Database class
-        # We need to mount the persistant volume before starting 
-        # the Qdrant container to avoid errors
-
-        self.import_files()
-
-        self.vector_database = Database(self.args)
-        self.conv = Converter()
-
-        self.llm_instance = "http://localhost:8080/completion"
-        self.agent_llm_instance = "http://localhost:8081/completion"
-    
-    def init_database(self):
-        self.vector_database.init_database()
-    
-    def configure_database(self):
-        self.vector_database.configure_database()
+        self.database = Database(self.args)
+        
     
     def add_files(self, file_path):
-        try:
-            documents, metadata, ids = self.conv.convert(file_path)
-        except Exception as e:
-            _log.error(f"Couldn't add files: {e}")
-            return "Couldn't add files"
-        self.vector_database.add(documents, metadata, ids)
-        return "Added Files"
+        converter = DoclingPDFLoader(file_path)
+        splits = converter.load_and_split()
+        self.vector_store = self.database.add_files(documents=splits)
+    
+    def restore(self):
+        self.vector_store = self.database.restore_database(self.target)
     
     def clean_up(self):
-        self.vector_database.clean_up()
+        self.database.clean_up()
     
     def export_files(self):
-        self.vector_database.export_database(self.target)
-
-    def import_files(self):
-        """
-        Imports files from a Qdrant persistent volume image by running a container, 
-        copying data to the host, and cleaning up the container.
-        """
-
-        container_name = "temp-container"
-        
-        try:
-            # Step 1: Start the container
-            try:
-                run_cmd(
-                    [self.args.engine, "run", "-d", "--name", container_name, self.target],
-                    debug=self.args.debug,
-                )
-                _log.info(f"Container '{container_name}' started successfully.")
-            except CalledProcessError as e:
-                _log.warning("No Qdrant storage image available, attempting to pull...")
-                try:
-                    run_cmd(
-                        [self.args.engine, "pull", self.target],
-                        debug=self.args.debug,
-                    )
-                    _log.info("Successfully pulled storage image.")
-                    run_cmd(
-                        [self.args.engine, "run", "-d", "--name", container_name, self.target],
-                        debug=self.args.debug,
-                    )
-                except CalledProcessError as pull_error:
-                    _log.error("Failed to pull storage image.")
-                    _log.error(pull_error)
-                    return
-
-            # Step 2: Copy the folder to the host
-            try:
-                run_cmd(
-                    [
-                        self.args.engine,
-                        "cp",
-                        f"{container_name}:/qdrant_storage",
-                        self.storage_file_path,
-                    ],
-                    debug=self.args.debug,
-                )
-                _log.info("Data copied successfully from container to host.")
-            except CalledProcessError as copy_error:
-                _log.error("Failed to copy data from container to host.")
-                _log.error(copy_error)
-                return
-
-        finally:
-            # Step 3: Stop and remove the container
-            try:
-                run_cmd(
-                    [self.args.engine, "stop", container_name],
-                    debug=self.args.debug,
-                )
-                _log.info(f"Container '{container_name}' stopped.")
-            except CalledProcessError:
-                _log.warning(f"Container '{container_name}' might already be stopped.")
-
-            try:
-                run_cmd(
-                    [self.args.engine, "rm", container_name],
-                    debug=self.args.debug,
-                )
-                _log.info(f"Container '{container_name}' removed.")
-            except CalledProcessError:
-                _log.warning(f"Container '{container_name}' might already be removed.")
-
-        _log.info("Successfully added files from Qdrant persistent volume image.")
+        self.database.export_database(self.target)
+        # TODO
+        # Push to cloud
+     
+    def format_docs(self, docs: Iterable[LCDocument]):
+        # Format documents for retrieval
+        return "\n\n".join(doc.page_content for doc in docs)
     
-    def push_files_to_cloud(self):
-        pass
+    def query_database(self, text):
+        retriever = self.vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 2})
+
+        retrieved_docs = retriever.invoke("Brian's real name")
+
+        context = self.format_docs(retrieved_docs)
+
+    
+    def create_chain(self):
+        # Create interface to talk with ramalama served llm
+        llm = ChatOpenAI(temperature=0.5,
+                max_tokens=None,
+                openai_api_base="http://localhost:8080", 
+                openai_api_key="ed")
+
+
+        # Setup database as part of the pipeline
+        retriever = self.vector_store.as_retriever(search_kwargs={"k": 1})
+
+        # Set up prompt
+        prompt = PromptTemplate.from_template(
+            "Context information is below.\n---------------------\n{context}\n---------------------\nGiven the context information and not prior knowledge, answer the query.\nQuery: {question}\nAnswer:\n"
+        )
+
+        # Create RAG chain
+        self.rag_chain = (
+            {"context": retriever | self.format_docs, "question": RunnablePassthrough()}
+            | prompt
+            | llm
+            | StrOutputParser()
+        )
+
+    def chain_from_scratch(self, text):
+        # Step 1: Start and End time for document retrieval
+        start_time = time.time()
+        
+        # Step 2: Set up retriever to fetch relevant documents
+        retriever = self.vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 1})
+        
+        # Step 3: Retrieve documents based on the query
+        retrieved_docs = retriever.invoke("Brian's real name")
+        
+        # End time for retrieval
+        end_time = time.time()
+        print(f"Document retrieval time: {end_time - start_time:.4f} seconds")
+        
+        # Step 4: Start and End time for document formatting
+        start_time = time.time()
+        context = self.format_docs(retrieved_docs)
+        
+        # End time for formatting docs
+        end_time = time.time()
+        print(f"Document formatting time: {end_time - start_time:.4f} seconds")
+        
+        # Step 5: Set up the LLM (using the local server)
+        llm = ChatOpenAI(temperature=0.5,
+                        max_tokens=None,
+                        openai_api_base="http://localhost:8080", 
+                        openai_api_key="ed")
+        
+        # Step 6: Set up the prompt template to structure the input for the model
+        prompt = PromptTemplate.from_template(
+            "Context information is below.\n---------------------\n{context}\n---------------------\nGiven the context information and not prior knowledge, answer the query.\nQuery: {question}\nAnswer:\n"
+        )
+
+        # Step 7: Start and End time for preparing the prompt
+        start_time = time.time()
+        final_prompt = prompt.format(context=context, question=text)
+
+        print("Size of final prompt: ", len(final_prompt))
+        
+        # End time for preparing the prompt
+        end_time = time.time()
+        print(f"Time to prepare final prompt: {end_time - start_time:.4f} seconds")
+        
+        # Step 8: Start and End time for invoking the LLM
+        start_time = time.time()
+
+        for chunk in llm.stream(final_prompt):
+            print(chunk.content, end="", flush=True)
+        print(" ")
+
+        
+        # End time for LLM invocation
+        end_time = time.time()
+        print(f"LLM invocation time: {end_time - start_time:.4f} seconds")
+        
+
+    
+    def query(self, text):
+        # call rag chain with input and stream output (interrupt to close cleanly)
+        try:
+            for chunk in self.rag_chain.stream(text):
+                print(chunk, end="", flush=True)
+        except KeyboardInterrupt:
+            print("\nStream interrupted.")
+        print(" ")
+
 
     def kube(self):
         pass
 
-    def agentic_query(self, text):
-        # Doesn't work quite yet 
-        context = self.query_database(text)
-        formatted_query = TEMPLATE_Q.format(context=context, query=text)
-
-        answer = self.query_api(formatted_query, self.agent_llm_instance)
-
-        _log.debug("ANSWER from agent: %s", answer)
-
-        if answer == "1":
-            formatted_query = TEMPLATE.format(context=context, query=text)
-        elif answer == "0":
-            formatted_query = TEMPLATE_NO_CONTEXT.format(query=text)
-        else:
-            _log.error("Unknown error occurred")
-            return
-        result = self.query_api(formatted_query, self.llm_instance)
-        return result
-    
     def query(self, text):
-        context = self.query_database(text)
-        formatted_query = TEMPLATE.format(context=context, query=text)
-        result = self.query_api(formatted_query, self.llm_instance)
-        return result
-    
-    def query_database(self, text):
-        return self.vector_database.search(text)
-    
-    def query_api(self, formatted_query, llm_host) -> str:
-        # Define the payload
-        payload = {
-            "prompt": formatted_query,
-            "n_predict": 20,
-            "no-warmup": "",
-            "stop": ["\n"]
-        }
-
-        # Define the headers
-        headers = {
-            "Content-Type": "application/json"
-        }
-
-        # Send the POST request
-        response = requests.post(llm_host, json=payload, headers=headers)
-
-        # Log the response
-        if response.status_code == 200:
-            result = response.json().get("content", "")
-            return result.strip()
-        else:
-            _log.error("Error: %s %s", response.status_code, response.text)
-            return ""
+        try:
+            for chunk in self.rag_chain.stream(text):
+                print(chunk, end="", flush=True)
+        except KeyboardInterrupt:
+            print("\nStream interrupted.")
+        print(" ")
 
     def run(self):
         print("> Welcome to the Rag Assistant!")
@@ -236,12 +208,16 @@ class Rag:
                     continue
                 
                 # Check for a specific query
-                result = self.query(user_input)
-                print("> Assistant: %s", result)
+                try:
+                    for chunk in self.rag_chain.stream(user_input):
+                        print(chunk, end="", flush=True)
+                except KeyboardInterrupt:
+                    print("\nStream interrupted.")
+                print(" ")
 
         except KeyboardInterrupt:
             print("\n> Exiting... Goodbye!")  # Catch any Interrupts and exit gracefully
-            # self.clean_up()
+            self.clean_up()
 
     def serve(self):
         # FastAPI app for serving
@@ -269,17 +245,17 @@ class Database:
         self.debug = args.debug
         self.volume_path = args.PATH[0]
 
-    def configure_database(self):
+        self.url = QDRANT_URL
+
         # self.init_database()
         self.collection_name = COLLECTION_NAME
 
         # initialize Qdrant client
         self.qdrant_client = QdrantClient("http://localhost:6333")
-        self.qdrant_client.set_model(DENSE_MODEL)
-        # comment this line to use dense vectors only
-        # self.qdrant_client.set_sparse_model(SPARSE_MODEL)
 
-    def init_database(self):
+        # Configure embedding model
+        self.embeddings = FastEmbedEmbeddings()
+
         print(self.volume_path)
         if self.volume_path is None:
             self.volume_path = os.path.join(os.path.dirname(os.getcwd()), "qdrant_storage")
@@ -295,8 +271,29 @@ class Database:
             _log.warning(f"Failed to initialize database container: {e}")
             self.start_database()
 
+    def restore_database(self, target):
+        if self.import_files(target) == True:
+            vector_store = QdrantVectorStore(
+                client=self.qdrant_client,
+                collection_name=self.collection_name,
+                embedding=self.embeddings,
+            )
+            return vector_store
+        else:
+            _log.warning(f"Failed to initialize Vector Database")
+    
+    def add_files(self, documents):
+        vector_store = QdrantVectorStore.from_documents(
+            documents,
+            self.embeddings,
+            url=self.url,
+            collection_name=self.collection_name,
+        )
+        return vector_store
+
     def get_client(self):
         return self.qdrant_client
+
     
     def start_database(self):
         run_cmd(
@@ -328,6 +325,11 @@ class Database:
         pass
 
     def export_database(self, target):
+        # Create snapshot
+        _log.info(f"Creating snapshot...")
+        self.qdrant_client.create_snapshot(collection_name=self.collection_name)
+        _log.info(self.qdrant_client.list_snapshots(collection_name=self.collection_name))
+
         _log.info(f"Building {target}...")
         # Check if the target image already exists and remove it if necessary
         try:
@@ -376,6 +378,106 @@ class Database:
         except Exception as e:
             _log.error(f"Failed to build new image: {e}")
             return None
+        
+    def import_files(self, target, storage_file_path=None):
+        """
+        Imports files from a Qdrant persistent volume image by running a container, 
+        copying data to the host, and cleaning up the container.
+        """
+
+        if storage_file_path == None:
+            storage_file_path = os.path.dirname(os.getcwd())
+
+        container_name = "temp-container"
+        
+        try:
+            # Step 1: Start the container
+            try:
+                run_cmd(
+                    [self.engine, "run", "-d", "--name", container_name, target],
+                    debug=self.debug,
+                )
+                _log.info(f"Container '{container_name}' started successfully.")
+            except CalledProcessError as e:
+                _log.warning("No Qdrant storage image available, attempting to pull...")
+                try:
+                    run_cmd(
+                        [self.engine, "pull", target],
+                        debug=self.debug,
+                    )
+                    _log.info("Successfully pulled storage image.")
+                    run_cmd(
+                        [self.engine, "run", "-d", "--name", container_name, target],
+                        debug=self.debug,
+                    )
+                except CalledProcessError as pull_error:
+                    _log.error("Failed to pull storage image.")
+                    _log.error(pull_error)
+                    return
+
+            # Step 2: Copy the folder to the host
+            try:
+                run_cmd(
+                    [
+                        self.engine,
+                        "cp",
+                        f"{container_name}:/qdrant_storage",
+                        storage_file_path,
+                    ],
+                    debug=self.debug,
+                )
+                _log.info("Data copied successfully from container to host.")
+            except CalledProcessError as copy_error:
+                _log.error("Failed to copy data from container to host.")
+                _log.error(copy_error)
+                return
+
+        finally:
+            # Step 3: Stop and remove the container
+            try:
+                run_cmd(
+                    [self.engine, "stop", container_name],
+                    debug=self.debug,
+                )
+                _log.info(f"Container '{container_name}' stopped.")
+            except CalledProcessError:
+                _log.warning(f"Container '{container_name}' might already be stopped.")
+
+            try:
+                run_cmd(
+                    [self.engine, "rm", container_name],
+                    debug=self.debug,
+                )
+                _log.info(f"Container '{container_name}' removed.")
+            except CalledProcessError:
+                _log.warning(f"Container '{container_name}' might already be removed.")
+
+        _log.info("Successfully added files from Qdrant persistent volume image.")
+
+        # # restore data
+        snapshot_directory = storage_file_path + "/qdrant_storage/docs"
+        # List all files in the directory
+        snapshot_files = [f for f in os.listdir(snapshot_directory) if f.endswith(".snapshot")]
+
+        # Check if there are any snapshot files
+        if snapshot_files:
+            # Select the first snapshot file
+            snapshot_file = snapshot_files[0]
+            snapshot_file_path = f"file:///qdrant/snapshots/docs/{snapshot_file}"
+            
+            # Recover the snapshot
+            self.qdrant_client.recover_snapshot(self.collection_name, snapshot_file_path)
+            print(f"Snapshot {snapshot_file} has been successfully recovered.")
+            return True
+        else:
+            print("No snapshot files found in the directory.")
+        
+        return False
+
+        # In a kube enviorment 
+
+        # we will need to change this snapshot_file_path = f"file:///qdrant/snapshots/docs/{snapshot_file}
+        # To a url 
     
     def search(self, text: str, limit=5):
         points = self.qdrant_client.query(self.collection_name, query_text=text, limit=limit)
@@ -400,79 +502,64 @@ class Database:
         self.stop_database()
         self.delete_database()
 
-
-class Converter:
-    """A Class designed to handle all document conversions"""
-    def __init__(self):
-        self.doc_converter = DocumentConverter()
-
-    def convert(self, file_path):
-        targets = []
-        _log.info(f"Converting files from path: {file_path}")
-
-        # Check if file_path is a directory or a file
-        if os.path.isdir(file_path):
-            targets.extend(self.walk(file_path))  # Walk directory and process all files
-        elif os.path.isfile(file_path):
-            targets.append(file_path)  # Process the single file
+class DoclingPDFLoader(BaseLoader):
+    def __init__(self, file_path: str | list[str], chunk_size: int = 1000, chunk_overlap: int = 200) -> None:
+        """
+        Initialize the loader with a file path or a list of file paths.
+        
+        Args:
+            file_path (str | list[str]): Path to the directory or list of PDF file paths.
+            chunk_size (int): Size of each text chunk.
+            chunk_overlap (int): Overlap between chunks.
+        """
+        # Check if input is a directory or list of file paths
+        if isinstance(file_path, str):
+            if os.path.isdir(file_path):
+                # If it's a directory, list all PDF files in the directory
+                self._file_paths = [os.path.join(file_path, f) for f in os.listdir(file_path) if f.endswith('.pdf')]
+                if not self._file_paths:
+                    raise ValueError(f"No PDF files found in the directory: {file_path}")
+            else:
+                raise ValueError(f"The provided path is not a valid directory: {file_path}")
+        elif isinstance(file_path, list):
+            # If it's a list, ensure it's not empty and contains valid file paths
+            if not file_path:
+                raise ValueError("The provided list of file paths is empty.")
+            self._file_paths = file_path
         else:
-            _log.error("Invalid file path provided")
-            return False
+            # Otherwise assume it's a single file path and check its validity
+            if not os.path.isfile(file_path) or not file_path.endswith('.pdf'):
+                raise ValueError(f"The provided file path is not a valid PDF file: {file_path}")
+            self._file_paths = [file_path]
 
-        result = self.doc_converter.convert_all(targets)
+        self._converter = DocumentConverter()
+        self._chunk_size = chunk_size
+        self._chunk_overlap = chunk_overlap
 
-        documents = []
-        ids = []
-        for file in result:
-            # Chunk the document using HybridChunker
-            for chunk in HybridChunker(tokenizer=DENSE_MODEL, max_tokens=1000).chunk(dl_doc=file.document):
-                # Extract the text and metadata from the chunk
-                document = Document(
-                    page_content=chunk.text,
-                    metadata=chunk.meta.export_json_dict(),
-                )
+    def lazy_load(self) -> Iterable[LCDocument]:
+        """Iterates over files and converts them into LCDocument objects."""
+        for source in self._file_paths:
+            dl_doc = self._converter.convert(source).document
+            text = dl_doc.export_to_markdown()
+            yield LCDocument(page_content=text)
 
-                # Append
-                documents.append(document)
-                
-                # Generate unique ID for the chunk
-                ids.append(chunk.meta.origin.binary_hash)
-        return documents, ids
+    def load_and_split(self):
+        """
+        Load the documents and split them into chunks.
+        
+        Returns:
+            List[LCDocument]: List of split documents.
+        """
+        # Load documents
+        docs = self.load()
+        # Split documents
+        chunker = RecursiveCharacterTextSplitter(
+            chunk_size=self._chunk_size,
+            chunk_overlap=self._chunk_overlap,
+        )
+        return chunker.split_documents(docs)
 
-    def walk(self, path):
-        targets = []
-        for root, dirs, files in os.walk(path, topdown=True):
-            if len(files) == 0:
-                continue
-            for f in files:
-                file = os.path.join(root, f)
-                if os.path.isfile(file):
-                    targets.append(file)
-        return targets
-    
-    def generate_hash(self, document: str) -> str:
-        """Generate a unique hash for a document."""
-        # Generate SHA256 hash of the document text
-        sha256_hash = hashlib.sha256(document.encode('utf-8')).hexdigest()
-        # Use the first 32 characters of the hash to create a UUID
-        return str(uuid.UUID(sha256_hash[:32]))
-
-
-# def generate(args):
-#     _log.info("Generating Rag instance...")
-#     _log.debug(f"Args provided: {args}")
-    
-#     rag = Rag(args)
-#     rag.init_database()
-#     rag.configure_database()
-
-#     rag.add_files(file_path=args.PATH[0])
-#     rag.export_files()
-#     rag.clean_up()
-#     # finally generate kube 
-
-#     # print(rag.query_database("brians email address"))
-
+# Imports from ramalama figuring out how to better manage this
 def perror(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
@@ -493,229 +580,43 @@ def run_cmd(args, cwd=None, stdout=subprocess.PIPE, ignore_stderr=False, debug=F
 
     return subprocess.run(args, check=True, cwd=cwd, stdout=stdout, stderr=stderr)
 
+
+def generate(args):
+    # FILE_PATH = "/mnt/c/Users/bmahabir/Desktop/pdfs" 
+    _log.info("Generating Rag instance...")
+    _log.debug(f"Args provided: {args}")
+    
+    rag = Rag(args)
+    rag.add_files(file_path=args.PATH[0])
+    rag.export_files()
+    rag.clean_up()
+    # finally generate kube 
+
 # ## TODO
 
 # # Add the ability to call ramalama serve to start instance
 # # Add kube play ability
 
-# if __name__ == "__main__":
-#     from argparse import Namespace
+if __name__ == "__main__":
+    FILE_PATH = "/mnt/c/Users/bmahabir/Desktop/pdfs" 
+    from argparse import Namespace
 
-#     args = Namespace(
-#         debug=False,
-#         engine='podman',
-#         PATH=[],
-#         IMAGE='qstorage:latest',
-#     )
+    args = Namespace(
+        debug=False,
+        engine='podman',
+        PATH=['/home/brian/ramalama/qdrant_storage'],
+        IMAGE='qs',
+    )
+    rag = Rag(args)
 
-#     rag = Rag(args)
-#     rag.configure_database()
-#     rag.run()
+    # rag.restore()
+    rag.add_files(FILE_PATH)
 
-def import_files(args, target, storage_file_path=None):
-    """
-    Imports files from a Qdrant persistent volume image by running a container, 
-    copying data to the host, and cleaning up the container.
-    """
+    # rag.chain_from_scratch("what is brians email")
 
-    if storage_file_path == None:
-        storage_file_path = os.path.dirname(os.getcwd())
+    # rag.create_chain()
+    # rag.run()
 
-    container_name = "temp-container"
-    
-    try:
-        # Step 1: Start the container
-        try:
-            run_cmd(
-                [args.engine, "run", "-d", "--name", container_name, target],
-                debug=args.debug,
-            )
-            _log.info(f"Container '{container_name}' started successfully.")
-        except CalledProcessError as e:
-            _log.warning("No Qdrant storage image available, attempting to pull...")
-            try:
-                run_cmd(
-                    [args.engine, "pull", target],
-                    debug=args.debug,
-                )
-                _log.info("Successfully pulled storage image.")
-                run_cmd(
-                    [args.engine, "run", "-d", "--name", container_name, target],
-                    debug=args.debug,
-                )
-            except CalledProcessError as pull_error:
-                _log.error("Failed to pull storage image.")
-                _log.error(pull_error)
-                return
+    rag.export_files()
 
-        # Step 2: Copy the folder to the host
-        try:
-            run_cmd(
-                [
-                    args.engine,
-                    "cp",
-                    f"{container_name}:/qdrant_storage",
-                    storage_file_path,
-                ],
-                debug=args.debug,
-            )
-            _log.info("Data copied successfully from container to host.")
-        except CalledProcessError as copy_error:
-            _log.error("Failed to copy data from container to host.")
-            _log.error(copy_error)
-            return
-
-    finally:
-        # Step 3: Stop and remove the container
-        try:
-            run_cmd(
-                [args.engine, "stop", container_name],
-                debug=args.debug,
-            )
-            _log.info(f"Container '{container_name}' stopped.")
-        except CalledProcessError:
-            _log.warning(f"Container '{container_name}' might already be stopped.")
-
-        try:
-            run_cmd(
-                [args.engine, "rm", container_name],
-                debug=args.debug,
-            )
-            _log.info(f"Container '{container_name}' removed.")
-        except CalledProcessError:
-            _log.warning(f"Container '{container_name}' might already be removed.")
-
-    _log.info("Successfully added files from Qdrant persistent volume image.")
-
-
-
-class DoclingPDFLoader(BaseLoader):
-    def __init__(self, file_path: str | list[str]) -> None:
-        # Check if input is a directory or list of file paths
-        if isinstance(file_path, str) and os.path.isdir(file_path):
-            # If it's a directory, list all PDF files in the directory
-            self._file_paths = [os.path.join(file_path, f) for f in os.listdir(file_path) if f.endswith('.pdf')]
-        elif isinstance(file_path, list):
-            # If it's a list, use the list as file paths
-            self._file_paths = file_path
-        else:
-            # Otherwise assume it's a single file path
-            self._file_paths = [file_path]
-
-        self._converter = DocumentConverter()
-
-    def lazy_load(self) -> Iterable[LCDocument]:
-        # Iterate over all files and convert them
-        for source in self._file_paths:
-            dl_doc = self._converter.convert(source).document
-            text = dl_doc.export_to_markdown()
-            yield LCDocument(page_content=text)
-
-FILE_PATH = "/mnt/c/Users/bmahabir/Desktop/pdfs"  # DocLayNet paper
-
-# Load and split documents
-loader = DoclingPDFLoader(file_path=FILE_PATH)
-
-chunker = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=200,
-)
-
-docs = loader.load()
-splits = chunker.split_documents(docs)
-
-# Use FastEmbed embeddings
-embeddings = FastEmbedEmbeddings()
-
-# Setup database
-args = Namespace(
-    debug=False,
-    engine='podman',
-    PATH=['/home/brian/ramalama/qdrant_storage'],
-    IMAGE='qstorage:latest',
-)
-
-import_files(args, "qs")
-
-database = Database(args)
-database.configure_database()
-database.init_database()
-
-client = database.get_client()
-
-# # restore data
-snapshot_directory = "/home/brian/ramalama/qdrant_storage/docs"
-# List all files in the directory
-snapshot_files = [f for f in os.listdir(snapshot_directory) if f.endswith(".snapshot")]
-
-# Check if there are any snapshot files
-if snapshot_files:
-    # Select the first snapshot file
-    snapshot_file = snapshot_files[0]
-    snapshot_file_path = f"file:///qdrant/snapshots/docs/{snapshot_file}"
-    
-    # Recover the snapshot
-    client.recover_snapshot(COLLECTION_NAME, snapshot_file_path)
-    print(f"Snapshot {snapshot_file} has been successfully recovered.")
-else:
-    print("No snapshot files found in the directory.")
-# We can also do this may be useful for kube
-
-# curl -X POST \
-#   'http://localhost:6333/collections/docs/snapshots/upload?priority=snapshot' \
-#   -H 'api-key: my-api-key' \
-#   -H 'Content-Type: multipart/form-data' \
-#   -F 'snapshot=@/home/brian/ramalama/ramalama/docs-4959314178120938-2024-12-30-07-06-08.snapshot'
-
-# # Set up Qdrant for vector storage
-QDRANT_URI = "http://localhost:6333"  # Assuming a local Qdrant instance
-
-vectorstore = Qdrant.from_documents(
-    docs,
-    embeddings,
-    url=QDRANT_URI,
-    collection_name=COLLECTION_NAME,
-)
-
-# Add files
-
-# Use Local AI for the LLM
-llm = ChatOpenAI(temperature=0.5,
-                max_tokens=None,
-                openai_api_base="http://localhost:8080", 
-                openai_api_key="ed")
-
-# Format documents for retrieval
-def format_docs(docs: Iterable[LCDocument]):
-    return "\n\n".join(doc.page_content for doc in docs)
-
-# Setup database as part of the pipeline
-retriever = vectorstore.as_retriever()
-
-# Set up prompt
-prompt = PromptTemplate.from_template(
-    "Context information is below.\n---------------------\n{context}\n---------------------\nGiven the context information and not prior knowledge, answer the query.\nQuery: {question}\nAnswer:\n"
-)
-
-# Create RAG chain
-rag_chain = (
-    {"context": retriever | format_docs, "question": RunnablePassthrough()}
-    | prompt
-    | llm
-    | StrOutputParser()
-)
-
-# call rag chain with input and stream output (interrupt to close cleanly)
-try:
-    for chunk in rag_chain.stream("Give me all the projects Brian worked"):
-        print(chunk, end="", flush=True)
-except KeyboardInterrupt:
-    print("\nStream interrupted.")
-print(" ")
-
-# client = database.get_client()
-# client.create_snapshot(collection_name=COLLECTION_NAME)
-# print(client.list_snapshots(collection_name=COLLECTION_NAME))
-
-database.export_database("qs")
-database.clean_up()
+    rag.clean_up()
