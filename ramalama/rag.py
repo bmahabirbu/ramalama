@@ -171,29 +171,9 @@ class Rag:
         # End time for LLM invocation
         end_time = time.time()
         print(f"LLM invocation time: {end_time - start_time:.4f} seconds")
-        
-
-    
-    def query(self, text):
-        # call rag chain with input and stream output (interrupt to close cleanly)
-        try:
-            for chunk in self.rag_chain.stream(text):
-                print(chunk, end="", flush=True)
-        except KeyboardInterrupt:
-            print("\nStream interrupted.")
-        print(" ")
-
 
     def kube(self):
         pass
-
-    def query(self, text):
-        try:
-            for chunk in self.rag_chain.stream(text):
-                print(chunk, end="", flush=True)
-        except KeyboardInterrupt:
-            print("\nStream interrupted.")
-        print(" ")
 
     def run(self):
         print("> Welcome to the Rag Assistant!")
@@ -261,7 +241,7 @@ class Database:
             os.makedirs(self.volume_path, exist_ok=True)
         else:
             os.makedirs(self.volume_path, exist_ok=True)
-            
+
         print(self.volume_path)
 
         try:
