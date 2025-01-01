@@ -567,15 +567,18 @@ def generate(args):
     # FILE_PATH = "/mnt/c/Users/bmahabir/Desktop/pdfs" 
     _log.info("Generating Rag instance...")
     _log.debug(f"Args provided: {args}")
-
-    print(args.PATH[0])
-    print(args.IMAGE)
     
     rag = Rag(args)
     rag.add_files(file_path=args.PATH[0])
     rag.export_files()
+
+    # Push to cloud
+    # rag.push()
+
     rag.clean_up()
+
     # finally generate kube 
+    # rag.kube()
 
 # ## TODO
 
@@ -584,24 +587,23 @@ def generate(args):
 
 if __name__ == "__main__":
     FILE_PATH = "/mnt/c/Users/bmahabir/Desktop/pdfs" 
-    from argparse import Namespace
 
     args = Namespace(
         debug=False,
         engine='podman',
         PATH=[''],
-        IMAGE='qs',
+        IMAGE='docker.io/brianmahabir/qs:latest',
     )
     rag = Rag(args)
 
-    # rag.restore()
-    rag.add_files(FILE_PATH)
+    rag.restore()
+    # rag.add_files(FILE_PATH)
 
     # rag.chain_from_scratch("what is brians email")
 
-    # rag.create_chain()
-    # rag.run()
+    rag.create_chain()
+    rag.run()
 
-    rag.export_files()
+    # rag.export_files()
 
-    rag.clean_up()
+    # rag.clean_up()
