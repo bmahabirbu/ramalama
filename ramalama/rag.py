@@ -446,6 +446,8 @@ class Database:
             # Select the first snapshot file
             snapshot_file = snapshot_files[0]
             snapshot_file_path = f"file:///qdrant/snapshots/docs/{snapshot_file}"
+
+            print(snapshot_file_path)
             
             # Recover the snapshot
             self.qdrant_client.recover_snapshot(self.collection_name, snapshot_file_path)

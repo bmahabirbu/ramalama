@@ -1,0 +1,26 @@
+# Base image
+FROM fedora:40
+
+# Install system dependencies: Python 3, Git, and Podman
+RUN dnf install -y python3 pip git podman && \
+    dnf clean all
+
+# Upgrade pip and install necessary Python packages
+RUN python3 -m pip install --upgrade pip && \
+    pip install fastapi uvicorn requests \
+    langchain_community langchain_core langchain_openai langchain_qdrant \
+    qdrant-client docling \
+    fastembed --extra-index-url https://download.pytorch.org/whl/cpu
+
+
+# Create a working directory
+WORKDIR /app
+
+# Copy the Python file from the host to the container
+COPY ramalama/rag.py /app/rag.py
+
+# Set entry point
+ENTRYPOINT ["python3", "/app/rag.py"]
+
+# Command to build container
+# podman build --file /home/brian/ramalama/container-images/rag/Containerfile -t rag /home/brian/ramalama
