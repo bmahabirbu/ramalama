@@ -6,6 +6,7 @@ RUN dnf install -y python3 pip git podman && \
     dnf clean all
 
 # Upgrade pip and install necessary Python packages
+# install docling/fastembed cpu only to drastically reduce size
 RUN python3 -m pip install --upgrade pip && \
     pip install fastapi uvicorn requests \
     langchain_community langchain_core langchain_openai langchain_qdrant \
@@ -18,6 +19,8 @@ WORKDIR /app
 
 # Copy the Python file from the host to the container
 COPY ramalama/rag.py /app/rag.py
+
+EXPOSE 8000
 
 # Set entry point
 ENTRYPOINT ["python3", "/app/rag.py"]
