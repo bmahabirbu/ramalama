@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: rag
+  name: rag
+spec:
+  initContainers:
+  - name: rag-data
+    image: docker.io/brianmahabir/qs:latest
+    command: ['sh', '-c', 'cp -r /qdrant_storage/* /shared/']
+    volumeMounts:
+    - name: qdrant_storage
+      mountPath: /shared
+  containers:
+  - env:
+    - name: rag
+      value: http://0.0.0.0:8000
+    image: localhost/rag:latest
+    name: rag-inference
+    ports:
+    - containerPort: 8000
+      hostPort: 8000
+    securityContext:
+      runAsNonRoot: true
+    volumeMounts:
+    - name: qdrant_storage
+      mountPath: /app/shared
+  - env:
+    - name: Qdrant
+      value: http://0.0.0.0:6333
+    image: docker.io/qdrant/qdrant:latest
+    name: rag-qdrant
+    ports:
+    - containerPort: 6333
+      hostPort: 6333
+    securityContext:
+      runAsNonRoot: true
+    volumeMounts:
+    - name: qdrant_storage
+      mountPath: /qdrant/snapshots
+  - env:
+    - name: Model
+    image: quay.io/ramalama/ramalama:latest
+    command: ["llama-server"]
+    args: ['--port', '8080', '-m', '/mnt/models/model.file', '-c', '2048', '--temp', '0.8', '--host', '0.0.0.0']
+    ports:
+    - containerPort: 8080
+      hostPort: 8080
+    volumeMounts:
+    - mountPath: /mnt/models/model.file
+      name: model
+    - mountPath: /dev/dri
+      name: dri
+  volumes:
+  - name: qdrant_storage
+    emptyDir: {}
+  - name: model
+    hostPath:
+      path: /home/brian/.local/share/ramalama/models/ollama/llama3:latest
+  - name: dri
+    hostPath:
+      path: /dev/dri

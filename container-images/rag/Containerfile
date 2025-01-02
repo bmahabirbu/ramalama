@@ -27,3 +27,16 @@ ENTRYPOINT ["python3", "/app/rag.py"]
 
 # Command to build container
 # podman build --file /home/brian/ramalama/container-images/rag/Containerfile -t rag /home/brian/ramalama
+
+# Command to run container
+# podman run --rm -it localhost/rag:latest
+
+# Command to run container and override entrypoint for debugging
+# podman run --rm -it --entrypoint /bin/bash localhost/rag:latest
+
+# Command to check container in kube play
+# podman attach id
+
+# Command to start and delete rag kube play
+# podman kube play rag.yaml
+# podman pod rm rag --force

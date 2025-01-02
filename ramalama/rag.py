@@ -49,7 +49,9 @@ _log = logging.getLogger(__name__)
 
 ociimage_rag = "org.containers.type=ai.image.rag"
 
-QDRANT_URL = "http://localhost:6333"
+# QDRANT_URL = "http://localhost:6333"
+QDRANT_URL = "http://0.0.0.0:6333"
+MODEL_URL = "http://0.0.0.0:8080"
 DENSE_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 LLM = ""
 COLLECTION_NAME = "docs"
@@ -63,8 +65,10 @@ class Rag:
         self.target = self.args.IMAGE
 
         self.database = Database(self.args)
+
+    def start_database(self):
+        self.database.start_database()
         
-    
     def add_files(self, file_path):
         converter = DoclingPDFLoader(file_path)
         splits = converter.load_and_split()
@@ -72,6 +76,9 @@ class Rag:
     
     def restore(self):
         self.vector_store = self.database.restore_database(self.target)
+    
+    def restore_kube(self):
+         self.vector_store = self.database.restore_database_kube()
     
     def clean_up(self):
         self.database.clean_up()
@@ -97,7 +104,7 @@ class Rag:
         # Create interface to talk with ramalama served llm
         llm = ChatOpenAI(temperature=0.5,
                 max_tokens=None,
-                openai_api_base="http://localhost:8080", 
+                openai_api_base=MODEL_URL, 
                 openai_api_key="ed")
 
 
@@ -205,7 +212,7 @@ class Rag:
 
         @app.get("/api/search")
         def search(user_input: str):
-            result = self.query(user_input)
+            result = self.rag_chain.invoke(user_input)
             return {"result": result}
         
         @app.get("/api/add_files")
@@ -214,9 +221,6 @@ class Rag:
             return {"result": result}
             
         uvicorn.run(app, host="0.0.0.0", port=8000)
-
-        # Probably edit clean up to push container as well to save data
-        self.vector_database.clean_up()
 
 
 class Database:
@@ -231,7 +235,7 @@ class Database:
         self.collection_name = COLLECTION_NAME
 
         # initialize Qdrant client
-        self.qdrant_client = QdrantClient("http://localhost:6333")
+        self.qdrant_client = QdrantClient(QDRANT_URL)
 
         # Configure embedding model
         self.embeddings = FastEmbedEmbeddings()
@@ -242,7 +246,7 @@ class Database:
         else:
             os.makedirs(self.volume_path, exist_ok=True)
 
-        print(self.volume_path)
+    def start_database(self):
 
         try:
             run_cmd(
@@ -251,7 +255,10 @@ class Database:
             )
         except Exception as e:
             _log.warning(f"Failed to initialize database container: {e}")
-            self.start_database()
+            run_cmd(
+                [self.engine, "start", "qdrant_container"],
+                debug=self.debug,
+            )
 
     def restore_database(self, target):
         if self.import_files(target) == True:
@@ -264,6 +271,20 @@ class Database:
         else:
             _log.warning(f"Failed to initialize Vector Database")
     
+    def restore_database_kube(self):
+        if self.import_files_kube() == True:
+            vector_store = QdrantVectorStore(
+                client=self.qdrant_client,
+                collection_name=self.collection_name,
+                embedding=self.embeddings,
+            )
+            return vector_store
+        else:
+            print("Cant Restore Vector Database")
+            _log.warning(f"Failed to initialize Vector Database")
+
+        
+    
     def add_files(self, documents):
         vector_store = QdrantVectorStore.from_documents(
             documents,
@@ -275,13 +296,6 @@ class Database:
 
     def get_client(self):
         return self.qdrant_client
-
-    
-    def start_database(self):
-        run_cmd(
-            [self.engine, "start", "qdrant_container"],
-            debug=self.debug,
-        )
     
     def stop_database(self):
         run_cmd(
@@ -360,6 +374,31 @@ class Database:
         except Exception as e:
             _log.error(f"Failed to build new image: {e}")
             return None
+        
+    def import_files_kube(self):
+        # # restore data
+        print("\n")
+        print(os.getcwd())
+        print(" ".join(os.listdir(os.getcwd())))
+        snapshot_directory = "shared/docs"
+        # List all files in the directory
+        snapshot_files = [f for f in os.listdir(snapshot_directory) if f.endswith(".snapshot")]
+        # Check if there are any snapshot files
+        if snapshot_files:
+            # Select the first snapshot file
+            snapshot_file = snapshot_files[0]
+            snapshot_file_path = f"file:///qdrant/snapshots/docs/{snapshot_file}"
+
+            print(snapshot_file_path)
+            
+            # Recover the snapshot
+            self.qdrant_client.recover_snapshot(self.collection_name, snapshot_file_path)
+            print(f"Snapshot {snapshot_file} has been successfully recovered.")
+            return True
+        else:
+            print("No snapshot files found in the directory.")
+        return False
+
         
     def import_files(self, target, storage_file_path=None):
         """
@@ -480,7 +519,7 @@ class Database:
     def clean_up(self):
         _log.info("Cleaning up database...")
         if self.volume_path is None:
-            _log.warning("No Database Volume Found")
+            _log.warning("No Database Mount Volume Found")
         else:
             shutil.rmtree(self.volume_path)
         self.stop_database()
@@ -566,11 +605,15 @@ def run_cmd(args, cwd=None, stdout=subprocess.PIPE, ignore_stderr=False, debug=F
 
 
 def generate(args):
+    # Testing Command
+    # ./bin/ramalama rag /mnt/c/Users/bmahabir/Desktop/pdfs docker.io/brianmahabir/qs:latest
+
     # FILE_PATH = "/mnt/c/Users/bmahabir/Desktop/pdfs" 
     _log.info("Generating Rag instance...")
     _log.debug(f"Args provided: {args}")
     
     rag = Rag(args)
+    rag.start_database()
     rag.add_files(file_path=args.PATH[0])
     rag.export_files()
 
@@ -579,7 +622,7 @@ def generate(args):
 
     rag.clean_up()
 
-    # finally generate kube 
+    # finally generate kube with the name of the target
     # rag.kube()
 
 # ## TODO
@@ -589,22 +632,21 @@ def generate(args):
 
 if __name__ == "__main__":
     FILE_PATH = "/mnt/c/Users/bmahabir/Desktop/pdfs" 
-
     args = Namespace(
         debug=False,
         engine='podman',
         PATH=[''],
         IMAGE='docker.io/brianmahabir/qs:latest',
     )
+    print("Starting RAG in Kube Play")
     rag = Rag(args)
-
-    rag.restore()
+    rag.restore_kube()
     # rag.add_files(FILE_PATH)
 
     # rag.chain_from_scratch("what is brians email")
 
     rag.create_chain()
-    rag.run()
+    rag.serve()
 
     # rag.export_files()
 
