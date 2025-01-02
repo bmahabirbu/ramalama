@@ -623,7 +623,8 @@ def generate(args):
     rag.clean_up()
 
     # finally generate kube with the name of the target
-    # rag.kube()
+    if args.generate == "kube":
+        rag.kube()
 
 # ## TODO
 

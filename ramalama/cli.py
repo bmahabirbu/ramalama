@@ -786,6 +786,11 @@ def rag_parser(subparsers):
 Files/Directory containing PDF, DOCX, PPTX, XLSX, HTML, AsciiDoc & Markdown
 formatted files to be processed""",
     )
+    parser.add_argument(
+        "--generate",
+        choices=["quadlet", "kube", "quadlet/kube"],
+        help="generate specified configuration format for running the Rag pipeline as service",
+    )
     parser.add_argument("IMAGE", help="OCI Image name to contain processed rag data")
     parser.set_defaults(func=rag_cli)
 
