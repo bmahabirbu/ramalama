@@ -16,7 +16,7 @@ spec:
   - env:
     - name: rag
       value: http://0.0.0.0:8000
-    image: localhost/rag:latest
+    image: docker.io/brianmahabir/rag:latest
     name: rag-inference
     ports:
     - containerPort: 8000
