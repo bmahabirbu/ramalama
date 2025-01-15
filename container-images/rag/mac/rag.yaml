@@ -55,4 +55,4 @@ spec:
     emptyDir: {}
   - name: model
     hostPath:
-      path: /home/core/.local/share/ramalama/models/ollama/llama3.2:latest
+      path: /Users/bmahabir/.local/share/ramalama/models/ollama/llama3.2:latest
