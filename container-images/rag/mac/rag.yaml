@@ -50,14 +50,9 @@ spec:
     volumeMounts:
     - mountPath: /mnt/models/model.file
       name: model
-    - mountPath: /dev/dri
-      name: dri
   volumes:
   - name: qdrant_storage
     emptyDir: {}
   - name: model
     hostPath:
       path: /var/home/core/.local/share/ramalama/models/ollama/llama3.2:latest
-  - name: dri
-    hostPath:
-      path: /dev/dri
