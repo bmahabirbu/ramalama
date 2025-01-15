@@ -42,8 +42,8 @@ spec:
   - env:
     - name: Model
     image: quay.io/ramalama/ramalama:latest
-    command: ["/bin/bash", "-c", "tail -f /dev/null"] 
-    # args: ['--port', '8080', '-m', '/mnt/models/model.file', '-c', '2048', '--temp', '0.8', '--host', '0.0.0.0']
+    command: ["llama-server"] 
+    args: ['--port', '8080', '-m', '/mnt/models/model.file', '-c', '2048', '--temp', '0.8', '--host', '0.0.0.0']
     ports:
     - containerPort: 8080
       hostPort: 8080
