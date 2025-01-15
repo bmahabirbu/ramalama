@@ -57,7 +57,7 @@ spec:
     emptyDir: {}
   - name: model
     hostPath:
-      path: /home/brian/.local/share/ramalama/models/ollama/llama3.2:latest
+      path: $HOME/.local/share/ramalama/models/ollama/llama3.2:latest"
   - name: dri
     hostPath:
       path: /dev/dri
