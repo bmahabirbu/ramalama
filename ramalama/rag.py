@@ -65,14 +65,14 @@ class Rag:
         self.target = self.args.IMAGE
 
         self.database = Database(self.args)
+        self.conv = Converter()
 
     def start_database(self):
         self.database.start_database()
         
     def add_files(self, file_path):
-        converter = DoclingPDFLoader(file_path)
-        splits = converter.load_and_split()
-        self.vector_store = self.database.add_files(documents=splits)
+        documents, metadata, ids = self.conv.convert(file_path)
+        self.vector_store = self.database.add_files(documents, metadata, ids)
     
     def restore(self):
         self.vector_store = self.database.restore_database(self.target)
@@ -185,6 +185,7 @@ class Rag:
     def run(self):
         print("> Welcome to the Rag Assistant!")
         try:
+            self.create_chain()
             while True:
                 # User input
                 user_input = input("> ").strip()
@@ -229,37 +230,23 @@ class Database:
         self.debug = args.debug
         self.volume_path = None
 
-        self.url = QDRANT_URL
-
-        # self.init_database()
-        self.collection_name = COLLECTION_NAME
-
-        # initialize Qdrant client
-        self.qdrant_client = QdrantClient(QDRANT_URL)
-
-        # Configure embedding model
-        self.embeddings = FastEmbedEmbeddings()
-
         if self.volume_path is None:
             self.volume_path = os.path.join(os.path.dirname(os.getcwd()), "qdrant_storage")
             os.makedirs(self.volume_path, exist_ok=True)
         else:
             os.makedirs(self.volume_path, exist_ok=True)
 
-    def start_database(self):
+        # if image is passed try to restore data before starting client
 
-        try:
-            run_cmd(
-                [self.engine, "run", "-d", "--name", "qdrant_container", "-p", "6333:6333", "-v", self.volume_path + ":/qdrant/snapshots", "docker.io/qdrant/qdrant"],
-                debug=self.debug,
-            )
-        except Exception as e:
-            _log.warning(f"Failed to initialize database container: {e}")
-            run_cmd(
-                [self.engine, "start", "qdrant_container"],
-                debug=self.debug,
-            )
+        # self.init_database()
+        self.collection_name = COLLECTION_NAME
 
+        # initialize Qdrant client
+        self.qdrant_client = QdrantClient(path=self.volume_path)
+
+        # Configure embedding model
+        self.embeddings = FastEmbedEmbeddings()
+    
     def restore_database(self, target):
         if self.import_files(target) == True:
             vector_store = QdrantVectorStore(
@@ -270,38 +257,19 @@ class Database:
             return vector_store
         else:
             _log.warning(f"Failed to initialize Vector Database")
-    
-    def restore_database_kube(self):
-        if self.import_files_kube() == True:
-            vector_store = QdrantVectorStore(
-                client=self.qdrant_client,
-                collection_name=self.collection_name,
-                embedding=self.embeddings,
-            )
-            return vector_store
-        else:
-            print("Cant Restore Vector Database")
-            _log.warning(f"Failed to initialize Vector Database")
 
-        
     
-    def add_files(self, documents):
-        vector_store = QdrantVectorStore.from_documents(
-            documents,
-            self.embeddings,
-            url=self.url,
+    def add_files(self, documents, metadata, ids):
+        self.add(documents, metadata, ids)
+        vector_store = QdrantVectorStore(
+            client=self.qdrant_client,
             collection_name=self.collection_name,
+            embedding=self.embeddings,
         )
         return vector_store
 
     def get_client(self):
         return self.qdrant_client
-    
-    def stop_database(self):
-        run_cmd(
-            [self.engine, "stop", "qdrant_container"],
-            debug=self.debug,
-        )
     
     def delete_database(self):
         run_cmd(
@@ -323,9 +291,6 @@ class Database:
     def export_database(self, target):
         # Create snapshot
         _log.info(f"Creating snapshot...")
-        self.qdrant_client.create_snapshot(collection_name=self.collection_name)
-        _log.info(self.qdrant_client.list_snapshots(collection_name=self.collection_name))
-
         _log.info(f"Building {target}...")
         # Check if the target image already exists and remove it if necessary
         try:
@@ -404,13 +369,15 @@ class Database:
         """
         Imports files from a Qdrant persistent volume image by running a container, 
         copying data to the host, and cleaning up the container.
+        Returns True if successful, False otherwise.
         """
 
-        if storage_file_path == None:
-            storage_file_path = os.path.dirname(os.getcwd())
+        if storage_file_path is None:
+            storage_file_path = os.getcwd()
 
         container_name = "temp-container"
-        
+        success = False  # Initialize success flag
+
         try:
             # Step 1: Start the container
             try:
@@ -434,7 +401,7 @@ class Database:
                 except CalledProcessError as pull_error:
                     _log.error("Failed to pull storage image.")
                     _log.error(pull_error)
-                    return
+                    return False  # Return False if pulling fails
 
             # Step 2: Copy the folder to the host
             try:
@@ -451,7 +418,9 @@ class Database:
             except CalledProcessError as copy_error:
                 _log.error("Failed to copy data from container to host.")
                 _log.error(copy_error)
-                return
+                return False  # Return False if copying fails
+
+            success = True  # Set success flag to True if no errors encountered
 
         finally:
             # Step 3: Stop and remove the container
@@ -473,34 +442,12 @@ class Database:
             except CalledProcessError:
                 _log.warning(f"Container '{container_name}' might already be removed.")
 
-        _log.info("Successfully added files from Qdrant persistent volume image.")
-
-        # # restore data
-        snapshot_directory = storage_file_path + "/qdrant_storage/docs"
-        # List all files in the directory
-        snapshot_files = [f for f in os.listdir(snapshot_directory) if f.endswith(".snapshot")]
-
-        # Check if there are any snapshot files
-        if snapshot_files:
-            # Select the first snapshot file
-            snapshot_file = snapshot_files[0]
-            snapshot_file_path = f"file:///qdrant/snapshots/docs/{snapshot_file}"
-
-            print(snapshot_file_path)
-            
-            # Recover the snapshot
-            self.qdrant_client.recover_snapshot(self.collection_name, snapshot_file_path)
-            print(f"Snapshot {snapshot_file} has been successfully recovered.")
+        if success:
+            _log.info("Successfully added files from Qdrant persistent volume image.")
             return True
         else:
-            print("No snapshot files found in the directory.")
-        
-        return False
-
-        # In a kube enviorment 
-
-        # we will need to change this snapshot_file_path = f"file:///qdrant/snapshots/docs/{snapshot_file}
-        # To a url 
+            _log.error("Failed to import files from Qdrant persistent volume image.")
+            return False
     
     def search(self, text: str, limit=5):
         points = self.qdrant_client.query(self.collection_name, query_text=text, limit=limit)
@@ -509,8 +456,8 @@ class Database:
             context += point.document + " "
         return context.strip()
     
-    def add(self, documents, metadatas, ids):
-        self.qdrant_client.add(self.collection_name, documents=documents, metadata=metadatas, ids=ids, batch_size=64)
+    def add(self, documents, metadata, ids):
+        self.qdrant_client.add(self.collection_name, documents=documents, metadata=metadata, ids=ids)
 
     def info(self):
         info = self.qdrant_client.get_collection(self.collection_name)
@@ -522,65 +469,62 @@ class Database:
             _log.warning("No Database Mount Volume Found")
         else:
             shutil.rmtree(self.volume_path)
-        self.stop_database()
-        self.delete_database()
 
-class DoclingPDFLoader(BaseLoader):
-    def __init__(self, file_path: str | list[str], chunk_size: int = 1000, chunk_overlap: int = 200) -> None:
-        """
-        Initialize the loader with a file path or a list of file paths.
-        
-        Args:
-            file_path (str | list[str]): Path to the directory or list of PDF file paths.
-            chunk_size (int): Size of each text chunk.
-            chunk_overlap (int): Overlap between chunks.
-        """
-        # Check if input is a directory or list of file paths
-        if isinstance(file_path, str):
-            if os.path.isdir(file_path):
-                # If it's a directory, list all PDF files in the directory
-                self._file_paths = [os.path.join(file_path, f) for f in os.listdir(file_path) if f.endswith('.pdf')]
-                if not self._file_paths:
-                    raise ValueError(f"No PDF files found in the directory: {file_path}")
-            else:
-                raise ValueError(f"The provided path is not a valid directory: {file_path}")
-        elif isinstance(file_path, list):
-            # If it's a list, ensure it's not empty and contains valid file paths
-            if not file_path:
-                raise ValueError("The provided list of file paths is empty.")
-            self._file_paths = file_path
+class Converter:
+    """A Class desgined to handle all document conversions"""
+    def __init__(self):
+        self.doc_converter = DocumentConverter()
+
+    def convert(self, file_path):
+        targets = []
+
+        # Check if file_path is a directory or a file
+        if os.path.isdir(file_path):
+            targets.extend(self.walk(file_path))  # Walk directory and process all files
+        elif os.path.isfile(file_path):
+            targets.append(file_path)  # Process the single file
         else:
-            # Otherwise assume it's a single file path and check its validity
-            if not os.path.isfile(file_path) or not file_path.endswith('.pdf'):
-                raise ValueError(f"The provided file path is not a valid PDF file: {file_path}")
-            self._file_paths = [file_path]
+            # if the path provided is wrong just return false
+            # Used in Rag.add files to avoid errors
+            return False
 
-        self._converter = DocumentConverter()
-        self._chunk_size = chunk_size
-        self._chunk_overlap = chunk_overlap
+        result = self.doc_converter.convert_all(targets)
 
-    def lazy_load(self) -> Iterable[LCDocument]:
-        """Iterates over files and converts them into LCDocument objects."""
-        for source in self._file_paths:
-            dl_doc = self._converter.convert(source).document
-            text = dl_doc.export_to_markdown()
-            yield LCDocument(page_content=text)
+        documents, metadatas, ids = [], [], []
+        for file in result:
+            # Chunk the document using HybridChunker
+            for chunk in HybridChunker(tokenizer=DENSE_MODEL, max_tokens=500).chunk(dl_doc=file.document):
+                # Extract the text and metadata from the chunk
+                doc_text = chunk.text
+                doc_meta = chunk.meta.export_json_dict() 
 
-    def load_and_split(self):
-        """
-        Load the documents and split them into chunks.
+                # Append to respective lists
+                documents.append(doc_text)
+                metadatas.append(doc_meta)
+                
+                # Generate unique ID for the chunk
+                doc_id = self.generate_hash(doc_text)
+                ids.append(doc_id)
+        return documents, metadatas, ids
+
+    def walk(self, path):
+        targets = []
+        for root, dirs, files in os.walk(path, topdown=True):
+            if len(files) == 0:
+                continue
+            for f in files:
+                file = os.path.join(root, f)
+                if os.path.isfile(file):
+                    targets.append(file)
+        return targets
+    
+    def generate_hash(self, document: str) -> str:
+        """Generate a unique hash for a document."""
+            # Generate SHA256 hash of the document text
+        sha256_hash = hashlib.sha256(document.encode('utf-8')).hexdigest()
         
-        Returns:
-            List[LCDocument]: List of split documents.
-        """
-        # Load documents
-        docs = self.load()
-        # Split documents
-        chunker = RecursiveCharacterTextSplitter(
-            chunk_size=self._chunk_size,
-            chunk_overlap=self._chunk_overlap,
-        )
-        return chunker.split_documents(docs)
+        # Use the first 32 characters of the hash to create a UUID
+        return str(uuid.UUID(sha256_hash[:32]))
 
 # Imports from ramalama figuring out how to better manage this
 def perror(*args, **kwargs):
@@ -613,18 +557,15 @@ def generate(args):
     _log.debug(f"Args provided: {args}")
     
     rag = Rag(args)
-    rag.start_database()
-    rag.add_files(file_path=args.PATH[0])
-    rag.export_files()
+    rag.restore()
+    rag.run()
+    # rag.add_files(file_path=args.PATH[0])
+    # rag.export_files()
 
     # Push to cloud
     # rag.push()
 
-    rag.clean_up()
-
-    # finally generate kube with the name of the target
-    if args.generate == "kube":
-        rag.kube()
+    # rag.clean_up()
 
 # ## TODO
 
@@ -641,13 +582,13 @@ if __name__ == "__main__":
     )
     print("Starting RAG in Kube Play")
     rag = Rag(args)
-    rag.restore_kube()
-    # rag.add_files(FILE_PATH)
+    # rag.restore_kube()
+    rag.add_files(FILE_PATH)
 
     # rag.chain_from_scratch("what is brians email")
 
-    rag.create_chain()
-    rag.serve()
+    # rag.create_chain()
+    # rag.serve()
 
     # rag.export_files()
 

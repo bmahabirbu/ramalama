@@ -1,18 +1,30 @@
 # Base image
-FROM fedora:40
+FROM registry.access.redhat.com/ubi9/ubi:9.4-1214.1729773476
+
+# Arguments for versions and SHA references
+ARG LLAMA_CPP_SHA=af148c9386da825a60c7038549c121c35ca56b50
+ARG WHISPER_CPP_SHA=6266a9f9e56a5b925e9892acf650f3eb1245814d
+
+# Copy and set up build scripts
+COPY ../scripts /scripts
+RUN chmod +x /scripts/*.sh && \
+    /scripts/build_llama_and_whisper.sh "ramalama" "$LLAMA_CPP_SHA" \
+      "$WHISPER_CPP_SHA" "/usr" "-DGGML_KOMPUTE=1"
 
 # Install system dependencies: Python 3, Git, and Podman
-RUN dnf install -y python3 pip git podman && \
-    dnf clean all
+RUN microdnf install -y python3 pip git podman && \
+    microdnf clean all
 
 # Upgrade pip and install necessary Python packages
-# install docling/fastembed cpu only to drastically reduce size
 RUN python3 -m pip install --upgrade pip && \
     pip install fastapi uvicorn requests \
     langchain_community langchain_core langchain_openai langchain_qdrant \
     qdrant-client docling \
     fastembed --extra-index-url https://download.pytorch.org/whl/cpu
 
+# Set environment variables for SHA references
+ENV WHISPER_CPP_SHA=${WHISPER_CPP_SHA}
+ENV LLAMA_CPP_SHA=${LLAMA_CPP_SHA}
 
 # Create a working directory
 WORKDIR /app
@@ -20,10 +32,12 @@ WORKDIR /app
 # Copy the Python file from the host to the container
 COPY ramalama/rag.py /app/rag.py
 
+# Expose the application port
 EXPOSE 8000
 
-# Set entry point
+# Set the entry point to the rag.py script
 ENTRYPOINT ["python3", "/app/rag.py"]
+
 
 # Command to build container
 # podman build --file /home/brian/ramalama/container-images/rag/Containerfile -t rag /home/brian/ramalama
@@ -34,9 +48,20 @@ ENTRYPOINT ["python3", "/app/rag.py"]
 # Command to run container and override entrypoint for debugging
 # podman run --rm -it --entrypoint /bin/bash localhost/rag:latest
 
+
 # Command to check container in kube play
 # podman attach id
 
 # Command to start and delete rag kube play
 # podman kube play rag.yaml
 # podman pod rm rag --force
+
+
+# Command to run llama server in background
+# nohup llama-server --port 8080 -m /mnt/models/model.file -c 2048 --temp 0.8 --host 0.0.0.0 > llama-server.log 2>&1 &
+
+# Command to kill it
+# pkill -9 -f llama-server
+
+# Command to check status
+# ps aux | grep llama-server | grep -v grep
