@@ -161,7 +161,7 @@ class Engine:
         dry_run(self.exec_args)
 
     def run(self):
-        run_cmd(self.exec_args)
+        run_cmd(self.exec_args, live_output=True, debug=self.debug)
 
     def exec(self):
         exec_cmd(self.exec_args)

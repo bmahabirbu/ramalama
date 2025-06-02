@@ -150,7 +150,7 @@ def exec_cmd(args, stdout2null=False, stderr2null=False):
         raise
 
 
-def run_cmd(args, cwd=None, stdout=subprocess.PIPE, ignore_stderr=False, ignore_all=False):
+def run_cmd(args, cwd=None, stdout=subprocess.PIPE, ignore_stderr=False, ignore_all=False, live_output=False, debug=False):
     """
     Run the given command arguments.
 
@@ -160,6 +160,8 @@ def run_cmd(args, cwd=None, stdout=subprocess.PIPE, ignore_stderr=False, ignore_
     stdout: standard output configuration
     ignore_stderr: if True, ignore standard error
     ignore_all: if True, ignore both standard output and standard error
+    live_output: if True, displays the standard output live. Overide by ignore_all
+    debug: if True, print debug information
     """
     logger.debug(f"run_cmd: {quoted(args)}")
     logger.debug(f"Working directory: {cwd}")
@@ -171,6 +173,10 @@ def run_cmd(args, cwd=None, stdout=subprocess.PIPE, ignore_stderr=False, ignore_
         serr = subprocess.DEVNULL
 
     sout = subprocess.PIPE
+
+    if live_output:
+        sout = None
+    
     if ignore_all:
         sout = subprocess.DEVNULL
 

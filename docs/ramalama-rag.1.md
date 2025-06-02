@@ -23,13 +23,6 @@ positional arguments:
 
 ## OPTIONS
 
-#### **--db**=*format*
-Sets the vector database output format for the converted documents. For Milvus and Qdrant both formats use the same embedding models via fastembed and use hybrid search.
-
-- **json**: Output the converted documents to a docling JSON format. Allows for immediate ingestion for pipelines that use docling.
-- **milvus**: Outputs the converted documents to a Milvus vector database. 
-- **qdrant**: Outputs the converted documents to a Qdrant vector database. (Default)
-
 #### **--env**=
 
 Set environment variables inside of the container.
