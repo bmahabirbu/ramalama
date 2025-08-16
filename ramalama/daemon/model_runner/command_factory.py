@@ -109,6 +109,7 @@ class CommandFactory:
         if ngl < 0:
             ngl = 999
         cmd.extend(["-ngl", f"{ngl}"])
-        cmd.extend(["--threads", f"{self.request_args.get("threads")}"])
+        threads = self.request_args.get("threads")
+        cmd += ["--threads", str(threads)]
 
         return cmd

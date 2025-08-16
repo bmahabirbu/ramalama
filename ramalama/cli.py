@@ -1099,6 +1099,15 @@ def daemon_parser(subparsers):
     cli_parser = daemon_parsers.add_parser("run")
     cli_parser.set_defaults(func=daemon_run_cli)
     cli_parser.add_argument("--store", default=CONFIG.store, type=abspath, help="path to store models")
+    
+
+    parser.add_argument(
+            "--image",
+            default=accel_image(CONFIG),
+            help="OCI container image to run with the specified AI model",
+            action=OverrideDefaultAction,
+            completer=local_images,
+        )
 
 
 def daemon_setup_cli(args):
@@ -1117,7 +1126,7 @@ def daemon_setup_cli(args):
             "8080:8080",
             "-v",
             f"{CONFIG.store}:/ramalama/models",
-            "quay.io/ramalama/rocm:latest",
+            "quay.io/ramalama/cuda:swap",
             "ramalama",
             "daemon",
             "run",
