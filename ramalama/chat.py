@@ -21,7 +21,6 @@ from ramalama.engine import dry_run, stop_container
 from ramalama.file_loaders.file_manager import OpanAIChatAPIMessageBuilder
 from ramalama.logger import logger
 from ramalama.mcp.mcp_agent import LLMAgent
-from ramalama.mcp.mcp_client import PureMCPClient
 
 
 def res(response, color):
@@ -128,55 +127,34 @@ class RamaLamaShell(cmd.Cmd):
             return
 
         try:
-            # Create clients for each MCP server URL
-            clients = []
-            for url in self.args.mcp:
-                try:
-                    clients.append(PureMCPClient(url))
-                    logger.debug(f"Created MCP client for {url}")
-                except Exception as e:
-                    perror(f"Failed to create MCP client for {url}: {e}")
+            llm_url = self.args.url
+            # New LLMAgent
+            self.mcp_agent = LLMAgent(self.args.mcp, llm_url)
 
-            if clients:
-                # Use the same LLM URL as the chat for the agent
-                llm_url = self.args.url
-                self.mcp_agent = LLMAgent(clients, llm_url)
+            def mcp_stream_callback(text):
+                color_default = ""
+                color_yellow = ""
+                if (self.args.color == "auto" and should_colorize()) or self.args.color == "always":
+                    color_default = "\033[0m"
+                    color_yellow = "\033[33m"
+                print(f"{color_yellow}{text}{color_default}", end="", flush=True)
 
-                # Set up proper streaming callback for MCP agent
-                def mcp_stream_callback(text):
-                    color_default = ""
-                    color_yellow = ""
-                    if (self.args.color == "auto" and should_colorize()) or self.args.color == "always":
-                        color_default = "\033[0m"
-                        color_yellow = "\033[33m"
-                    print(f"{color_yellow}{text}{color_default}", end="", flush=True)
+            self.mcp_agent._stream_callback = mcp_stream_callback
 
-                self.mcp_agent._stream_callback = mcp_stream_callback
+            # Initialize the agent synchronously
+            self.mcp_agent.initialize_sync()
 
-                # Initialize the agent and get available tools
-                init_results, tools = self.mcp_agent.initialize()
+            # Show summary
+            print("Connected to MCP servers.")
+            print(f"Total tools available: {len(self.mcp_agent.get_available_tools())}")
 
-                # Show connection summary (simplified)
-                for i, result in enumerate(init_results):
-                    server_name = result['result']['serverInfo']['name']
-                    server_tools = [tool for tool in tools if tool.get('server') == server_name]
-                    print(f"Connected to: {server_name}")
-                    print(f"Found {len(server_tools)} tool(s) from {server_name}")
+            print("\nAvailable tools and expected inputs:")
+            self.mcp_agent.print_tools()
 
-                print(f"Total tools available: {len(tools)}")
-
-                # Debug: show tool names and their inputs
-                print("\nAvailable tools and expected inputs:")
-                for tool in self.mcp_agent.available_tools:
-                    name = tool.get("name")
-                    input_props = tool.get("inputSchema", {}).get("properties", {})
-                    input_keys = list(input_props.keys())
-                    print(f"{name} {input_keys if input_keys else '{}'}")
-
-                print("\nUsage:")
-                print("  - Ask questions naturally (automatic tool selection)")
-                print("  - Use '/tool [question]' to manually select which tool to use")
-                print("  - Use '/bye' or 'exit' to quit")
+            print("\nUsage:")
+            print("  - Ask questions naturally (automatic tool selection)")
+            print("  - Use '/tool [question]' to manually select which tool to use")
+            print("  - Use '/bye' or 'exit' to quit")
 
         except Exception as e:
             perror(f"Failed to initialize MCP: {e}")
@@ -189,74 +167,92 @@ class RamaLamaShell(cmd.Cmd):
         return self.mcp_agent.should_use_tools(content, self.conversation_history)
 
     def _handle_mcp_request(self, content: str) -> str:
-        """Handle a request using MCP tools (multi-tool capable, automatic)."""
+        """Handle a request using MCP tools (automatic)."""
+        if not self.mcp_agent:
+            return ""
         try:
-            # Automatic tool selection and argument generation
-            results = self.mcp_agent.execute_task(content, manual=False, stream=True)
-
-            # When streaming, results will be None since output is streamed directly
-            if results is None:
-                return ""  # Return empty string since content was already streamed
-            # If multiple tools ran, join results into a single answer
-            elif isinstance(results, list):
-                combined = "\n\n".join(f"🔧 {r['tool']}: {r['output']}" for r in results)
-                return f"Multi-tool execution:\n{combined}"
-            else:
-                return results
+            result = self.mcp_agent.execute_task_sync(content, stream=True)
+            # Streaming already prints output
+            return "" if result is None else result
         except Exception as e:
             logger.debug(f"MCP request handling error: {e}", exc_info=True)
             return f"Error using MCP tools: {e}"
 
     def _handle_manual_tool_selection(self, content: str):
-        if not self.mcp_agent or not self.mcp_agent.available_tools:
+        """Prompt user to select tools and provide arguments, then execute them."""
+        tools = self.mcp_agent.get_available_tools() if self.mcp_agent else []
+        if not tools:
             print("No MCP tools available.")
             return
 
-        parts = content.strip().split(None, 1)
-        question = parts[1] if len(parts) > 1 else ""
-
-        selected_tools = self._select_tools()
+        selected_tools = self._select_tools(tools)
         if not selected_tools:
             return
 
         responses = []
         for tool in selected_tools:
-            response = self.mcp_agent.execute_specific_tool(question, tool['name'], manual=True)
-            responses.append({"tool": tool['name'], "output": response})
+            try:
+                args = self._prompt_tool_args(tool)
+                result = self.mcp_agent.execute_specific_tool_sync(tool.name, args)
+                responses.append({"tool": tool.name, "output": result})
+            except Exception as e:
+                responses.append({"tool": tool.name, "output": f"Error: {e}"})
 
-        # Display results
         for r in responses:
-            print(f"\n🔧 {r['tool']} -> {r['output']}")
+            output = r['output']
+            if '\n' in str(output):
+                # Multi-line output - format with proper indentation
+                lines = str(output).strip().split('\n')
+                print(f"\n🔧 {r['tool']} ->")
+                for line in lines:
+                    print(f"   {line}")
+            else:
+                # Single line output
+                print(f"\n🔧 {r['tool']} -> {output}")
 
-        # Save to history
-        self.conversation_history.append({"role": "user", "content": f"/tool {question}"})
-        self.conversation_history.append({"role": "assistant", "content": str(responses)})
+        self.conversation_history.extend([
+            {"role": "user", "content": f"/tool {content}"},
+            {"role": "assistant", "content": str(responses)}
+        ])
 
-    def _select_tools(self):
-        """Interactive multi-tool selection without prompting for arguments."""
-        if not self.mcp_agent or not self.mcp_agent.available_tools:
-            return None
 
-        print("\nAvailable tools:")
-        for i, tool in enumerate(self.mcp_agent.available_tools, 1):
-            server_info = f" (from {tool['server']})" if 'server' in tool else ""
-            print(f"  {i}. {tool['name']}: {tool['description']}{server_info}")
+    def _select_tools(self, tools: list):
+        """Interactive multi-tool selection."""
+        self.mcp_agent.print_tools()
+        choice = input("\nSelect tool(s) (e.g. 1,2,3) or 'q' to cancel: ").strip()
+        if choice.lower() == 'q':
+            return []
 
         try:
-            choice = input("\nSelect tool(s) (e.g. 1,2,3) or 'q' to cancel: ").strip()
-            if choice.lower() == 'q':
-                return None
-
             indices = [int(c.strip()) - 1 for c in choice.split(",")]
-            selected = [
-                self.mcp_agent.available_tools[i] for i in indices if 0 <= i < len(self.mcp_agent.available_tools)
-            ]
-
+            selected = [tools[i] for i in indices if 0 <= i < len(tools)]
+            if selected:
+                print()  # Add newline after successful selection
             return selected
-
         except (ValueError, KeyboardInterrupt):
             print("\nCancelled.")
-            return None
+            return []
+
+
+    def _prompt_tool_args(self, tool):
+        """Prompt the user for arguments for a given tool."""
+        args = {}
+        for name, info in getattr(tool, "inputSchema", {}).get("properties", {}).items():
+            typ = info.get("type", "string")
+            val = input(f"Enter value for {name} ({typ}): ").strip()
+            if not val:
+                continue
+            try:
+                if typ == "integer":
+                    val = int(val)
+                elif typ == "number":
+                    val = float(val)
+                elif typ == "boolean":
+                    val = val.lower() in ("true", "1", "yes", "on")
+            except ValueError:
+                pass
+            args[name] = val
+        return args
 
     def handle_args(self):
         prompt = " ".join(self.args.ARGS) if self.args.ARGS else None
@@ -373,8 +369,7 @@ class RamaLamaShell(cmd.Cmd):
         # Clean up MCP connections first
         if self.mcp_agent:
             try:
-                for client in self.mcp_agent.clients:
-                    client.close()
+                self.mcp_agent.close_sync()
                 logger.debug("Closed MCP connections")
             except Exception as e:
                 logger.debug(f"Error closing MCP connections: {e}")
