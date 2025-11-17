@@ -32,6 +32,11 @@ EMBED_MODEL = os.getenv("EMBED_MODEL", "jinaai/jina-embeddings-v2-small-en")
 SPARSE_MODEL = os.getenv("SPARSE_MODEL", "prithivida/Splade_PP_en_v1")
 RANK_MODEL = os.getenv("RANK_MODEL", "Xenova/ms-marco-MiniLM-L-6-v2")
 COLLECTION_NAME = "rag"
+# Port configuration from environment variables
+DEFAULT_MODEL_HOST = os.getenv("MODEL_HOST", "localhost")
+DEFAULT_MODEL_PORT = int(os.getenv("MODEL_PORT", "8080"))
+DEFAULT_HOST = os.getenv("HOST", "0.0.0.0")
+DEFAULT_PORT = int(os.getenv("PORT", "8081"))
 # Needed for mac to not give errors
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
@@ -492,10 +497,10 @@ subparsers = parser.add_subparsers(dest='command')
 
 serve_parser = subparsers.add_parser('serve', help='Run RAG as OpenAI-compatible HTTP API server')
 serve_parser.add_argument("vector_path", type=str, help="Path to the vector database")
-serve_parser.add_argument("--model-host", default="localhost", help="The hostname where the model is being served")
-serve_parser.add_argument("--model-port", default=8080, type=int, help="The port where the model is being served")
-serve_parser.add_argument("--host", default="0.0.0.0", help="Host to bind server")
-serve_parser.add_argument("--port", default=8081, type=int, help="Port for RAG API")
+serve_parser.add_argument("--model-host", default=DEFAULT_MODEL_HOST, help="The hostname where the model is being served")
+serve_parser.add_argument("--model-port", default=DEFAULT_MODEL_PORT, type=int, help="The port where the model is being served")
+serve_parser.add_argument("--host", default=DEFAULT_HOST, help="Host to bind server")
+serve_parser.add_argument("--port", default=DEFAULT_PORT, type=int, help="Port for RAG API")
 serve_parser.set_defaults(func=serve_rag_api)
 
 load_parser = subparsers.add_parser('load', help='Preload RAG Embedding Models')

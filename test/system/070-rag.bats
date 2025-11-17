@@ -78,6 +78,13 @@ load helpers
     run_ramalama --dryrun run --rag $RAG_DIR ollama://smollm:135m
     is "$output" ".*--mount=type=bind,source=$RAG_DIR,destination=/rag/vector.db.*" "Expected RAG dir to be mounted"
     rmdir $RAG_DIR
+
+    # Test that -p port flag is respected
+    run_ramalama --dryrun run --rag quay.io/ramalama/myrag:1.2 -p 9090 ollama://smollm:135m
+    is "${lines[1]}" ".*--port 9090" "Expected RAG framework to use port 9090 when -p 9090 is specified"
+    is "${lines[1]}" ".*-e PORT=9090" "Expected PORT environment variable to be set to 9090"
+    is "${lines[0]}" ".*--port.*" "Expected model to use a different port"
+    assert "${lines[0]}" !~ ".*--port 9090" "Expected model to not use the same port as RAG proxy"
 }
 
 @test "ramalama rag README.md" {

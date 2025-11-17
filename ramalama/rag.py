@@ -123,10 +123,22 @@ class RagEngine(Engine):
         self.sourcetype = sourcetype
         super().__init__(args)
         self.add_rag()
+        self.add_rag_env_vars()
 
     def add_labels(self):
         super().add_labels()
         self.add_label(f"ai.ramalama.rag.{self.sourcetype}={self.args.rag}")
+
+    def add_rag_env_vars(self):
+        """Add environment variables for the RAG framework to respect port settings"""
+        if hasattr(self.args, 'port') and self.args.port:
+            self.add_env_option(f"PORT={self.args.port}")
+        if hasattr(self.args, 'model_port') and self.args.model_port:
+            self.add_env_option(f"MODEL_PORT={self.args.model_port}")
+        if hasattr(self.args, 'model_host') and self.args.model_host:
+            self.add_env_option(f"MODEL_HOST={self.args.model_host}")
+        if hasattr(self.args, 'host') and self.args.host:
+            self.add_env_option(f"HOST={self.args.host}")
 
     def add_rag(self):
         if self.sourcetype is RagSource.DB:
@@ -135,7 +147,8 @@ class RagEngine(Engine):
             # Added temp read write because vector database requires write access even if nothing is written
             self.add_args(f"--mount=type=bind,source={rag},destination=/rag/vector.db{self.relabel()}")
         else:
-            self.add_args(f"--mount=type=image,source={self.args.rag},destination=/rag")
+            # Image volumes need readwrite for lock files
+            self.add_args(f"--mount=type=image,source={self.args.rag},destination=/rag,readwrite=true")
 
 
 class RagTransport(OCI):

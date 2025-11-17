@@ -1117,6 +1117,9 @@ def _rag_args(args):
     # If --port was specified, use it for the RAG proxy, and
     # select a random port for the model
     args.port = None
+    # Clear port_override to allow compute_serving_port to compute a new port for the model
+    if hasattr(args, 'port_override'):
+        delattr(args, 'port_override')
     rag_args.model_port = args.port = compute_serving_port(args, exclude=[rag_args.port])
     rag_args.model_args = args
     rag_args.generate = ""
