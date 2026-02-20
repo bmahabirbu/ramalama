@@ -296,6 +296,8 @@ AccelType: TypeAlias = Literal["vulkan"]
 
 @lru_cache(maxsize=1)
 def get_accel() -> AccelType | Literal["none"]:
+    if sys.platform == "win32":
+        return "vulkan"
     if os.path.exists("/dev/dxg"):
         return "vulkan"
     if os.path.exists("/dev/dri"):

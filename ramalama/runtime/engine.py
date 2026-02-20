@@ -87,14 +87,13 @@ class BaseEngine(ABC):
         if ramalama.utils.common.podman_machine_accel:
             self.exec_args += ["--device", "/dev/dri"]
 
-        # WSL2 / Windows Podman Machine: /dev/dxg + WSL GPU driver libraries
-        if os.path.exists("/dev/dxg"):
-            self.exec_args += ["--device", "/dev/dxg"]
-            if os.path.isdir("/usr/lib/wsl"):
-                self.exec_args += [
-                    "--mount", "type=bind,src=/usr/lib/wsl,dst=/usr/lib/wsl,readonly",
-                    "--env", "LD_LIBRARY_PATH=/usr/lib/wsl/lib",
-                ]
+        # Windows native or WSL2: /dev/dxg provides GPU access via WSL GPU driver
+        if sys.platform == "win32" or os.path.exists("/dev/dxg"):
+            self.exec_args += [
+                "--device", "/dev/dxg",
+                "--mount", "type=bind,src=/usr/lib/wsl,dst=/usr/lib/wsl,readonly",
+                "--env", "LD_LIBRARY_PATH=/usr/lib/wsl/lib",
+            ]
         # Native Linux: /dev/dri for Vulkan
         elif os.path.exists("/dev/dri"):
             self.exec_args += ["--device", "/dev/dri"]
