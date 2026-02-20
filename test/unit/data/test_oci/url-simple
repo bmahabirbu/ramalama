@@ -1,3 +1,0 @@
-FROM registry.access.redhat.com/ubi10-micro:latest AS build
-COPY sha256-cfe21da457a108815d015dff95bed59c34a6f170fde7e4f99fa0c3f809251df3 /data/models/aimodel/aimodel
-RUN ln -s aimodel/aimodel /data/models/model.file

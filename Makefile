@@ -13,8 +13,7 @@ PROJECT_DIR ?= $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 EXCLUDE_DIRS ?= .venv venv .tox build
 EXCLUDE_OPTS ?= $(addprefix --exclude-dir=,$(EXCLUDE_DIRS))
 PYTHON_SCRIPTS ?= $(shell grep -lEr "^\#\!\s*/usr/bin/(env +)?python(3)?(\s|$$)" $(EXCLUDE_OPTS) $(PROJECT_DIR) || true)
-RUFF_TARGETS ?= ramalama scripts test bin/ramalama
-E2E_IMAGE ?= localhost/e2e:latest
+RUFF_TARGETS ?= ramalama scripts bin/ramalama
 
 default: help
 
@@ -35,10 +34,6 @@ help:
 	@echo "Install ramalama"
 	@echo
 	@echo "  - make install"
-	@echo
-	@echo "Test ramalama"
-	@echo
-	@echo "  - make test"
 	@echo
 	@echo "Clean the repository"
 	@echo
@@ -154,78 +149,6 @@ pypi-build:   clean
 .PHONY: pypi
 pypi: pypi-build
 	python3 -m twine upload dist/*
-
-.PHONY: e2e-image
-e2e-image:
-	podman inspect $(E2E_IMAGE) &> /dev/null || \
-		podman build -t $(E2E_IMAGE) -f container-images/e2e/Containerfile .
-
-e2e-tests-in-container: extra-opts = --security-opt unmask=/proc/* --device /dev/net/tun
-
-%-in-container: e2e-image
-	podman run --rm \
-		--userns=keep-id:size=200000 \
-		--security-opt label=disable \
-		--security-opt=mask=/sys/bus/pci/drivers/i915 \
-		$(extra-opts) \
-		-v /tmp \
-		-v $(CURDIR):/src \
-		$(E2E_IMAGE) make $*
-
-.PHONY: ci
-ci:
-	test/ci.sh
-
-.PHONY: requires-tox
-requires-tox:
-	@command -v tox >/dev/null 2>&1 || ${MYPIP} install tox
-
-.PHONY: unit-tests
-unit-tests: requires-tox
-	tox
-
-.PHONY: unit-tests-verbose
-unit-tests-verbose: requires-tox
-	tox -- --full-trace --capture=tee-sys
-
-.PHONY: cov-tests
-cov-tests: requires-tox
-	tox -- --cov
-
-.PHONY: detailed-cov-tests
-detailed-cov-tests: requires-tox
-	tox -e coverage
-
-.PHONY: e2e-tests
-e2e-tests: requires-tox
-	# This makefile target runs the new e2e-tests pytest based
-	tox -q -e e2e
-
-.PHONY: e2e-tests-nocontainer
-e2e-tests-nocontainer: requires-tox
-	# This makefile target runs the new e2e-tests pytest based
-	tox -q -e e2e -- --no-container
-
-.PHONY: e2e-tests-docker
-e2e-tests-docker: requires-tox
-	# This makefile target runs the new e2e-tests pytest based
-	tox -q -e e2e -- --container-engine=docker
-
-.PHONY: end-to-end-tests
-end-to-end-tests: validate e2e-tests e2e-tests-nocontainer ci
-	make clean
-	hack/tree_status.sh
-
-.PHONY: test
-test: tests
-
-.PHONY: tests
-tests: unit-tests end-to-end-tests
-
-.PHONY: rag-requirements
-rag-requirements:
-	touch container-images/common/requirements-rag.in
-	make -C container-images/common rag-requirements
 
 .PHONY: clean
 clean:

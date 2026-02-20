@@ -15,7 +15,7 @@
         "properties": {
           "name": { 
             "type": "string",
-            "enum": ["serve", "bench", "convert", "quantize"]
+            "enum": ["serve"]
           },
           "inference_engine": {
             "type": "object",

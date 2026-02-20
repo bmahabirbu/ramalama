@@ -1,4 +1,3 @@
-import json
 import os
 import platform
 import random
@@ -6,41 +5,29 @@ import socket
 import subprocess
 from abc import ABC, abstractmethod
 from functools import cached_property
-from typing import Any, Optional
+from typing import Optional
 
-from ramalama.common import ContainerEntryPoint
-from ramalama.compose import Compose
-from ramalama.config import get_config
-from ramalama.engine import Engine, dry_run, is_healthy, wait_for_healthy
-from ramalama.kube import Kube
-from ramalama.model_inspect.base_info import ModelInfoBase
-from ramalama.model_inspect.gguf_info import GGUFModelInfo
-from ramalama.model_inspect.gguf_parser import GGUFInfoParser
-from ramalama.model_inspect.safetensor_info import SafetensorModelInfo
-from ramalama.model_inspect.safetensor_parser import SafetensorInfoParser
-from ramalama.model_store.global_store import GlobalModelStore
-from ramalama.model_store.store import ModelStore
-from ramalama.quadlet import Quadlet
-
-from datetime import datetime, timezone
-
-from ramalama.benchmarks.manager import BenchmarksManager
-from ramalama.benchmarks.schemas import BenchmarkRecord, BenchmarkRecordV1, get_benchmark_record
-from ramalama.benchmarks.utilities import parse_json, print_bench_results
 from ramalama.common import (
     MNT_DIR,
     MNT_FILE_DRAFT,
+    ContainerEntryPoint,
     accel_image,
     exec_cmd,
     genname,
     is_split_file_model,
     perror,
     populate_volume_from_image,
-    run_cmd,
     set_accel_env_vars,
 )
+from ramalama.compose import Compose
+from ramalama.config import get_config
+from ramalama.engine import Engine, dry_run, is_healthy, wait_for_healthy
+from ramalama.kube import Kube
 from ramalama.logger import logger
+from ramalama.model_store.global_store import GlobalModelStore
+from ramalama.model_store.store import ModelStore
 from ramalama.path_utils import get_container_mount_path
+from ramalama.quadlet import Quadlet
 
 MODEL_TYPES = ["file", "https", "http", "oci", "huggingface", "hf", "modelscope", "ms", "ollama", "rlcr"]
 
@@ -94,25 +81,12 @@ class TransportBase(ABC):
     def __not_implemented_error(self, param):
         return NotImplementedError(f"ramalama {param} for '{type(self).__name__}' not implemented")
 
-    def login(self, args):
-        raise self.__not_implemented_error("login")
-
-    def logout(self, args):
-        raise self.__not_implemented_error("logout")
-
     def pull(self, args):
         raise self.__not_implemented_error("pull")
-
-    def push(self, source_model, args):
-        raise self.__not_implemented_error("push")
 
     @abstractmethod
     def remove(self, args) -> bool:
         raise self.__not_implemented_error("rm")
-
-    @abstractmethod
-    def bench(self, args, cmd: list[str]):
-        raise self.__not_implemented_error("bench")
 
     @abstractmethod
     def serve(self, args, cmd: list[str]):
@@ -121,10 +95,6 @@ class TransportBase(ABC):
     @abstractmethod
     def exists(self) -> bool:
         raise self.__not_implemented_error("exists")
-
-    @abstractmethod
-    def inspect(self, args):
-        raise self.__not_implemented_error("inspect")
 
 
 class Transport(TransportBase):
@@ -295,17 +265,6 @@ class Transport(TransportBase):
             return f"{MNT_DIR}/{model_file.name}"
         return self.model_store.get_blob_file_path(model_file.hash)
 
-    def _get_inspect_model_path(self, dry_run: bool) -> str:
-        """Return a concrete file path for inspection.
-        Prefer the safetensor blob if available; otherwise use the entry path.
-        """
-        if dry_run:
-            return "/path/to/model"
-        if self.model_type == 'oci':
-            return self._get_entry_model_path(False, False, dry_run)
-        safetensor_blob = self.model_store.get_safetensor_blob_path(self.model_tag, self.filename)
-        return safetensor_blob or self._get_entry_model_path(False, False, dry_run)
-
     def _get_mmproj_path(self, use_container: bool, should_generate: bool, dry_run: bool) -> Optional[str]:
         """
         Returns the path to the mmproj blob on the host if use_container and should_generate are both False.
@@ -377,16 +336,14 @@ class Transport(TransportBase):
             args.MODEL = self.resolve_model()
         self.engine = self.new_engine(args)
 
-        self.engine.add(
-            [
-                "--label",
-                "ai.ramalama",
-                "--name",
-                name,
-                "--env=HOME=/tmp",
-                "--init",
-            ]
-        )
+        self.engine.add([
+            "--label",
+            "ai.ramalama",
+            "--name",
+            name,
+            "--env=HOME=/tmp",
+            "--init",
+        ])
 
     def setup_container(self, args):
         name = self.get_container_name(args)
@@ -439,9 +396,9 @@ class Transport(TransportBase):
             # Convert path to container-friendly format (handles Windows path conversion)
             container_blob_path = get_container_mount_path(blob_path)
             mount_path = f"{MNT_DIR}/{file.name}"
-            self.engine.add(
-                [f"--mount=type=bind,src={container_blob_path},destination={mount_path},ro{self.engine.relabel()}"]
-            )
+            self.engine.add([
+                f"--mount=type=bind,src={container_blob_path},destination={mount_path},ro{self.engine.relabel()}"
+            ])
 
         if self.draft_model:
             draft_model = self.draft_model._get_entry_model_path(args.container, args.generate, args.dryrun)
@@ -450,56 +407,6 @@ class Transport(TransportBase):
             mount_opts = f"--mount=type=bind,src={container_draft_model},destination={MNT_FILE_DRAFT}"
             mount_opts += f",ro{self.engine.relabel()}"
             self.engine.add([mount_opts])
-
-    def bench(self, args, cmd: list[str]):
-        set_accel_env_vars()
-
-        output_format = getattr(args, "format", "table")
-
-        if args.dryrun:
-            if args.container:
-                self.engine.dryrun()
-            else:
-                dry_run(cmd)
-
-            return
-        elif args.container:
-            self.setup_container(args)
-            self.setup_mounts(args)
-            self.engine.add([args.image] + cmd)
-            result = self.engine.run_process()
-        else:
-            result = run_cmd(cmd, encoding="utf-8")
-
-        try:
-            bench_results = parse_json(result.stdout)
-        except (json.JSONDecodeError, ValueError):
-            message = f"Could not parse benchmark output. Expected JSON but got:\n{result.stdout}"
-            raise ValueError(message)
-
-        base_payload: dict = {
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "configuration": {
-                "container_image": args.image,
-                "container_runtime": args.engine,
-                "inference_engine": args.runtime,
-                "runtime_args": cmd,
-            },
-        }
-        results: list[BenchmarkRecord] = list()
-        for bench_result in bench_results:
-            result_record: BenchmarkRecordV1 = get_benchmark_record({"result": bench_result, **base_payload}, "v1")
-            results.append(result_record)
-
-        if output_format == "json":
-            print(result.stdout)
-        else:
-            print_bench_results(results)
-
-        config = get_config()
-        if not config.benchmarks.disable:
-            bench_manager = BenchmarksManager(config.benchmarks.storage_folder)
-            bench_manager.save(results)
 
     def serve_nonblocking(self, args, cmd: list[str]) -> subprocess.Popen | None:
         if args.container:
@@ -679,44 +586,6 @@ class Transport(TransportBase):
     def compose(self, model_paths, chat_template_paths, mmproj_paths, args, exec_args, output_dir):
         compose = Compose(self.model_name, model_paths, chat_template_paths, mmproj_paths, args, exec_args)
         compose.generate().write(output_dir)
-
-    def inspect_metadata(self) -> dict[str, Any]:
-        model_path = self._get_entry_model_path(False, False, False)
-
-        if GGUFInfoParser.is_model_gguf(model_path):
-            return GGUFInfoParser.parse_metadata(model_path).data
-        return {}
-
-    def inspect(
-        self,
-        show_all: bool = False,
-        show_all_metadata: bool = False,
-        get_field: str = "",
-        as_json: bool = False,
-        dryrun: bool = False,
-    ) -> Any:
-        model_name = self.filename
-        model_registry = self.type.lower()
-        model_path = self._get_inspect_model_path(dryrun)
-        if GGUFInfoParser.is_model_gguf(model_path):
-            if not show_all_metadata and get_field == "":
-                gguf_info: GGUFModelInfo = GGUFInfoParser.parse(model_name, model_registry, model_path)
-                return gguf_info.serialize(json=as_json, all=show_all)
-
-            metadata = GGUFInfoParser.parse_metadata(model_path)
-            if show_all_metadata:
-                return metadata.serialize(json=as_json)
-            elif get_field != "":  # If a specific field is requested, print only that field
-                field_value = metadata.get(get_field)
-                if field_value is None:
-                    raise KeyError(f"Field '{get_field}' not found in GGUF model metadata")
-                return field_value
-
-        if SafetensorInfoParser.is_model_safetensor(model_name):
-            safetensor_info: SafetensorModelInfo = SafetensorInfoParser.parse(model_name, model_registry, model_path)
-            return safetensor_info.serialize(json=as_json, all=show_all)
-
-        return ModelInfoBase(model_name, model_registry, model_path).serialize(json=as_json)
 
     def print_pull_message(self, model_name) -> None:
         model_name = trim_model_name(model_name)

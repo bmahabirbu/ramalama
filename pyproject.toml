@@ -19,7 +19,6 @@ keywords = [
   "podman",
   "docker",
   "gpu",
-  "rag",
 ]
 dependencies = [
   "argcomplete",
@@ -57,36 +56,11 @@ text = "MIT"
 [project.optional-dependencies]
 dev = [
     "argcomplete~=3.0",
-    "bcrypt",
     "codespell~=2.0",
-    "huggingface_hub~=1.4.1",
-    "hypothesis>=6.135.26",
-    "pytest~=9.0",
     "ruff>=0.14.14",
-    "wheel~=0.46.3",
     "mypy",
     "types-PyYAML",
     "types-jsonschema",
-    "tox",
-    "requests"
-]
-
-cov = [
-    "ramalama[dev]",
-    "pytest-cov",
-]
-
-cov-detailed = [
-    "ramalama[cov]",
-    "pytest-func-cov",
-    "pytest-report",
-    "pytest-json",
-    "pytest-html",
-]
-
-[dependency-groups]
-dev = [
-    "ramalama[cov-detailed]"
 ]
 
 [project.urls]
@@ -150,17 +124,6 @@ select = ["E", "F", "W", "I"]
 preview = true
 quote-style = "preserve"
 
-[tool.coverage]
-html.directory = "coverage/html"
-xml.output = "coverage/coverage.xml"
-json.output = "coverage/coverage.json"
-lcov.output = "coverage/coverage.lcov"
-
-[tool.pytest.ini_options]
-testpaths = ["test"]
-markers = ["e2e", "distro_integration"]
-addopts = "-m 'not e2e' --color=yes --durations=10"
-
 [tool.setuptools.packages.find]
 include = ["ramalama", "ramalama.*"]
 
@@ -180,79 +143,6 @@ include = ["ramalama", "ramalama.*"]
 [tool.check-wheel-contents]
 # W002 fails on duplicate files, and completions for bash and zsh are identical
 ignore = ["W002"]
-
-[tool.tox]
-
-[tool.tox.env_run_base]
-package = "wheel"
-extras = ["dev", "cov"]
-pass_env = [
-  "GITHUB_ACTIONS",
-  "RAMALAMA_*",
-]
-commands = [
-  [
-    "pytest",
-    "-vvv",
-    "--tb=short",
-    "--basetemp={envtmpdir}",
-    { replace = "posargs", extend = true },
-  ],
-]
-
-[tool.tox.env.e2e]
-deps = [
-    "mlx-lm ; sys_platform == 'darwin' and platform_machine == 'arm64'",
-    "pytest-timeout"
-]
-commands = [
-  [
-    "pytest",
-    "-m", "e2e",
-    "-vvv",
-    "--timeout=900",
-    "--durations=10",
-    "--basetemp={envtmpdir}",
-    "--tb=short",
-    { replace = "posargs", extend = true },
-  ],
-]
-
-[tool.tox.env.coverage]
-extras = ["dev", "cov", "cov-detailed"]
-commands = [
-  [
-    "pytest",
-    "-vvv",
-    "--cov",
-    "--cov-report=xml",
-    "--cov-report=html",
-    "--cov-report=json",
-    "--cov-report=lcov",
-    "--cov-report=term",
-    "--tb=short",
-    "--basetemp={envtmpdir}",
-    { replace = "posargs", extend = true },
-  ],
-]
-
-[tool.pixi.workspace]
-channels = ["conda-forge"]
-platforms = ["linux-64"]
-
-[tool.pixi.pypi-dependencies]
-ramalama = { path = ".", editable = true }
-
-[tool.pixi.environments]
-default = { solve-group = "default", features = [] }
-cov = { features = ["cov"], solve-group = "default" }
-cov-detailed = { features = ["cov-detailed"], solve-group = "default" }
-dev = { features = ["dev"], solve-group = "default" }
-
-[tool.pixi.tasks]
-
-[tool.pixi.dependencies]
-tox = ">=4.30.2,<5"
 
 [tool.mypy]
 python_version = "3.10"

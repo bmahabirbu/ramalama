@@ -4,7 +4,7 @@ import sys
 from dataclasses import dataclass, field, fields
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal, Mapping, TypeAlias
+from typing import Any, Mapping
 
 from ramalama.cli_arg_normalization import normalize_pull_arg
 from ramalama.common import apple_vm, available
@@ -14,21 +14,6 @@ from ramalama.log_levels import LogLevel, coerce_log_level
 from ramalama.toml_parser import TOMLParser
 
 DEFAULT_IMAGE: str = "quay.io/ramalama/ramalama"
-GGUF_QUANTIZATION_MODES: TypeAlias = Literal[
-    "Q2_K",
-    "Q3_K_S",
-    "Q3_K_M",
-    "Q3_K_L",
-    "Q4_0",
-    "Q4_K_S",
-    "Q4_K_M",
-    "Q5_0",
-    "Q5_K_S",
-    "Q5_K_M",
-    "Q6_K",
-    "Q8_0",
-]
-DEFAULT_GGUF_QUANTIZATION_MODE: GGUF_QUANTIZATION_MODES = "Q4_K_M"
 
 
 def _get_default_config_dirs() -> list[Path]:
@@ -42,21 +27,17 @@ def _get_default_config_dirs() -> list[Path]:
         # Windows-specific paths using APPDATA and LOCALAPPDATA
         appdata = os.getenv("APPDATA", os.path.expanduser("~/AppData/Roaming"))
         localappdata = os.getenv("LOCALAPPDATA", os.path.expanduser("~/AppData/Local"))
-        dirs.extend(
-            [
-                Path(os.path.join(localappdata, "ramalama")),
-                Path(os.path.join(appdata, "ramalama")),
-            ]
-        )
+        dirs.extend([
+            Path(os.path.join(localappdata, "ramalama")),
+            Path(os.path.join(appdata, "ramalama")),
+        ])
     else:
         # Unix-specific paths
-        dirs.extend(
-            [
-                Path("/etc/ramalama"),
-                Path(os.path.expanduser(os.path.join(os.getenv("XDG_DATA_HOME", "~/.local/share"), "ramalama"))),
-                Path(os.path.expanduser(os.path.join(os.getenv("XDG_CONFIG_HOME", "~/.config"), "ramalama"))),
-            ]
-        )
+        dirs.extend([
+            Path("/etc/ramalama"),
+            Path(os.path.expanduser(os.path.join(os.getenv("XDG_DATA_HOME", "~/.local/share"), "ramalama"))),
+            Path(os.path.expanduser(os.path.join(os.getenv("XDG_CONFIG_HOME", "~/.config"), "ramalama"))),
+        ])
 
     return dirs
 
@@ -133,38 +114,12 @@ def coerce_to_bool(value: Any) -> bool:
     raise ValueError(f"Cannot coerce {value!r} to bool")
 
 
-def get_storage_folder(base_path: str | None = None):
-    if base_path is None:
-        base_path = get_default_store()
-
-    return os.path.join(base_path, "benchmarks")
-
-
-@dataclass
-class Benchmarks:
-    storage_folder: str = field(default_factory=get_storage_folder)
-    disable: bool = False
-
-    def __post_init__(self):
-        os.makedirs(self.storage_folder, exist_ok=True)
-
-
 @dataclass
 class UserConfig:
     no_missing_gpu_prompt: bool = False
 
     def __post_init__(self):
         self.no_missing_gpu_prompt = coerce_to_bool(self.no_missing_gpu_prompt)
-
-
-@dataclass
-class OpenaiProviderConfig:
-    api_key: str | None = None
-
-
-@dataclass
-class ProviderConfig:
-    openai: OpenaiProviderConfig = field(default_factory=OpenaiProviderConfig)
 
 
 @dataclass
@@ -216,17 +171,13 @@ class HTTPClientConfig:
 
 @dataclass
 class BaseConfig:
-    benchmarks: Benchmarks = field(default_factory=Benchmarks)
     cache_reuse: int = 256
-    carimage: str = "registry.access.redhat.com/ubi10-micro:latest"
     container: bool = None  # type: ignore
     ctx_size: int = 0
-    convert_type: Literal["artifact", "car", "raw"] = "raw"
     default_image: str = DEFAULT_IMAGE
     dryrun: bool = False
     engine: SUPPORTED_ENGINES | None = field(default_factory=get_default_engine)
     env: list[str] = field(default_factory=list)
-    gguf_quantization_mode: GGUF_QUANTIZATION_MODES = DEFAULT_GGUF_QUANTIZATION_MODE
     host: str = "0.0.0.0"
     http_client: HTTPClientConfig = field(default_factory=HTTPClientConfig)
     image: str = None  # type: ignore
