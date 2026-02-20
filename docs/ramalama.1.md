@@ -37,7 +37,7 @@ RamaLama CLI defaults can be modified via ramalama.conf files. Default settings 
 
 ### Test and run your models more securely
 
-Because RamaLama defaults to running AI models inside of rootless containers using Podman or Docker. These containers isolate the AI models from information on the underlying host. With RamaLama containers, the AI model is mounted as a volume into the container in read/only mode. This results in the process running the model, llama.cpp or vLLM, being isolated from the host. Finally, containers are run with --rm options which means that any content written during the running of the container is wiped out when the application exits.
+Because RamaLama defaults to running AI models inside of rootless containers using Podman or Docker. These containers isolate the AI models from information on the underlying host. With RamaLama containers, the AI model is mounted as a volume into the container in read/only mode. This results in the process running the model being isolated from the host. Finally, containers are run with --rm options which means that any content written during the running of the container is wiped out when the application exits.
 
 ### Here’s how RamaLama delivers a robust security footprint:
 
@@ -122,8 +122,8 @@ Note: OCI images cannot be used with the --nocontainer option. This option disab
 #### **--quiet**
 Decrease output verbosity.
 
-#### **--runtime**=*llama.cpp* | *vllm*
-specify the runtime to use, valid options are 'llama.cpp' and 'vllm' (default: llama.cpp)
+#### **--runtime**=*llama.cpp* | *mlx*
+specify the runtime to use, valid options are 'llama.cpp' and 'mlx' (default: llama.cpp)
 The default can be overridden in the ramalama.conf file.
 
 #### **--store**=STORE

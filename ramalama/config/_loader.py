@@ -66,7 +66,7 @@ def get_default_store() -> str:
 
 
 def get_all_inference_spec_dirs(subdir: str) -> list[Path]:
-    ramalama_root = Path(__file__).parent.parent
+    ramalama_root = Path(__file__).resolve().parent.parent.parent
     development_spec_dir = ramalama_root / "inference-spec" / subdir
     all_dirs = [development_spec_dir, *[conf_dir / "inference" for conf_dir in DEFAULT_CONFIG_DIRS]]
 

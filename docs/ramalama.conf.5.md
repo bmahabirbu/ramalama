@@ -131,10 +131,7 @@ RAMALAMA_IMAGE environment variable overrides this field.
   INTEL_VISIBLE_DEVICES  = "quay.io/ramalama/intel-gpu"
   ASCEND_VISIBLE_DEVICES = "quay.io/ramalama/cann"
   MUSA_VISIBLE_DEVICES   = "quay.io/ramalama/musa"
-  VLLM                   = "registry.redhat.io/rhelai1/ramalama-vllm"
-
-Alternative images to use when RamaLama recognizes specific hardware or user
-specified vllm model runtime.
+Alternative images to use when RamaLama recognizes specific hardware.
 
 **keep_groups**=false
 
@@ -198,8 +195,8 @@ OCI container image to run with the specified AI model when using RAG content.
 
 **runtime**="llama.cpp"
 
-Specify the AI runtime to use; valid options are 'llama.cpp', 'vllm', and 'mlx' (default: llama.cpp)
-Options: llama.cpp, vllm, mlx
+Specify the AI runtime to use; valid options are 'llama.cpp' and 'mlx' (default: llama.cpp)
+Options: llama.cpp, mlx
 
 **selinux**=false
 

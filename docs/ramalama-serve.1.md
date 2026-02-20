@@ -30,11 +30,10 @@ Modify individual model transports by specifying the `huggingface://`, `oci://`,
 URL support means if a model is on a web site or even on your local system, you can run it directly.
 
 ## REST API ENDPOINTS
-Under the hood, `ramalama-serve` uses the `llama.cpp` HTTP server by default. When using `--runtime=vllm`, it uses the vLLM server. When using `--runtime=mlx`, it uses the MLX LM server.
+Under the hood, `ramalama-serve` uses the `llama.cpp` HTTP server by default. When using `--runtime=mlx`, it uses the MLX LM server.
 
 For REST API endpoint documentation, see:
 - llama.cpp: [https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md#api-endpoints](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md#api-endpoints)
-- vLLM: [https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html)
 - MLX LM: [https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/SERVER.md](https://github.com/ml-explore/mlx-lm/blob/main/mlx_lm/SERVER.md)
 
 ## OPTIONS
@@ -62,7 +61,7 @@ Path of the authentication file for OCI registries
 Min chunk size to attempt reusing from the cache via KV shifting
 
 #### **--ctx-size**, **-c**
-size of the prompt context. This option is also available as **--max-model-len**. Applies to llama.cpp and vllm regardless of alias (default: 4096, 0 = loaded from model)
+size of the prompt context. This option is also available as **--max-model-len** (default: 4096, 0 = loaded from model)
 
 #### **--detach**, **-d**
 Run the container in the background and print the new container ID.
@@ -147,7 +146,6 @@ Maximum number of tokens to generate. Set to 0 for unlimited output (default: 0)
 This parameter is mapped to the appropriate runtime-specific parameter:
 - llama.cpp: `-n` parameter
 - MLX: `--max-tokens` parameter
-- vLLM: `--max-tokens` parameter
 
 #### **--model-draft**
 
@@ -221,7 +219,7 @@ The image to use to process the RAG database specified by the `--rag` option. Th
 will create a proxy which embellishes client requests with RAG data before passing them on to the LLM, and returns the responses.
 
 #### **--runtime-args**="*args*"
-Add *args* to the runtime (llama.cpp or vllm) invocation.
+Add *args* to the runtime invocation.
 
 #### **--seed**=
 Specify seed rather than using random seed model interaction
@@ -313,7 +311,7 @@ CONTAINER ID  IMAGE                             COMMAND               CREATED   
 
 ### Generate quadlet service off of tiny OCI Model
 ```
-$ ramalama --runtime=vllm serve --name tiny --generate=quadlet oci://quay.io/rhatdan/tiny:latest
+$ ramalama serve --name tiny --generate=quadlet oci://quay.io/rhatdan/tiny:latest
 Downloading quay.io/rhatdan/tiny:latest...
 Trying to pull quay.io/rhatdan/tiny:latest...
 Getting image source signatures
@@ -334,7 +332,7 @@ After=local-fs.target
 AddDevice=-/dev/accel
 AddDevice=-/dev/dri
 AddDevice=-/dev/kfd
-Exec=vllm serve --port 8080 /run/model/model.file
+Exec=llama-server --port 8080 -m /run/model/model.file
 Image=quay.io/ramalama/ramalama:latest
 Mount=type=volume,source=tiny:latest.volume,dest=/mnt/models,ro
 ContainerName=tiny
@@ -356,7 +354,7 @@ Image=quay.io/rhatdan/tiny:latest
 
 ### Generate quadlet service off of tiny OCI Model and output to directory
 ```
-$ ramalama --runtime=vllm serve --name tiny --generate=quadlet:~/.config/containers/systemd/ oci://quay.io/rhatdan/tiny:latest
+$ ramalama serve --name tiny --generate=quadlet:~/.config/containers/systemd/ oci://quay.io/rhatdan/tiny:latest
 Generating quadlet file: tiny.container
 Generating quadlet file: tiny.image
 Generating quadlet file: tiny.volume

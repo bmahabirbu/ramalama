@@ -12,7 +12,6 @@ import ramalama.utils.common
 from ramalama.cli.arg_types import BaseEngineArgsType
 from ramalama.utils.common import exec_cmd, perror, run_cmd
 from ramalama.utils.compat import NamedTemporaryFile
-from ramalama.config import get_config
 from ramalama.utils.logger import logger
 from ramalama.utils.path_utils import normalize_host_path_for_container
 
@@ -414,15 +413,10 @@ def add_labels(args, add_label: Callable[[str], None]):
 def is_healthy(args, timeout: int = 3, model_name: str | None = None):
     """Check if the response from the container indicates a healthy status."""
     conn = None
-    config = get_config()
     try:
         conn = HTTPConnection("127.0.0.1", args.port, timeout=timeout)
         if getattr(args, "debug", False):
             conn.set_debuglevel(1)
-        if config.runtime == 'vllm':
-            conn.request("GET", "/ping")
-            vllm_ping_resp = conn.getresponse()
-            return vllm_ping_resp.status == 200
         conn.request("GET", "/health")
         health_resp = conn.getresponse()
         health_resp.read()
@@ -462,9 +456,8 @@ def is_healthy(args, timeout: int = 3, model_name: str | None = None):
 
 def wait_for_healthy(args, health_func: Callable[[Any], bool], timeout=None):
     """Waits for a container to become healthy by polling its endpoint."""
-    config = get_config()
     if timeout is None:
-        timeout = 180 if config.runtime == "vllm" else 20
+        timeout = 20
     logger.debug(f"Waiting for container {args.name} to become healthy (timeout: {timeout}s)...")
     start_time = time.time()
 

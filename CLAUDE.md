@@ -83,14 +83,14 @@ Manages local model storage:
 - `reffile.py` - Reference file handling for tracking model origins
 
 ### Command System (`ramalama/command/`)
-- `factory.py` - `assemble_command()` builds runtime commands (llama.cpp, vllm, mlx)
+- `factory.py` - `assemble_command()` builds runtime commands (llama.cpp, mlx)
 - `context.py` - Command execution context
 - `schema.py` - Inference spec schema handling
 
 ### Key Patterns
 - **GPU Detection**: `get_accel()` in `common.py` detects GPU type (CUDA, ROCm, Vulkan, etc.) and selects appropriate container image
 - **Container Images**: GPU-specific images at `quay.io/ramalama/{ramalama,cuda,rocm,intel-gpu,...}`
-- **Inference Engines**: llama.cpp (default), vllm, mlx (macOS only) - configured via YAML specs in `inference-spec/engines/`
+- **Inference Engines**: llama.cpp (default), mlx (macOS only) - configured via YAML specs in `inference-spec/engines/`
 
 ## Test Structure
 
