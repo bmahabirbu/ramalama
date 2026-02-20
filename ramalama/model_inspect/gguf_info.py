@@ -1,7 +1,7 @@
 from json import dumps
 from typing import Any, Dict, Optional, Union
 
-from ramalama.endian import GGUFEndian
+from ramalama.utils.endian import GGUFEndian
 from ramalama.model_inspect.base_info import ModelInfoBase, Tensor, adjust_new_line
 
 

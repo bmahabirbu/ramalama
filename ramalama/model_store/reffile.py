@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from ramalama.common import generate_sha256, sanitize_filename
-from ramalama.compat import StrEnum
-from ramalama.logger import logger
+from ramalama.utils.common import generate_sha256, sanitize_filename
+from ramalama.utils.compat import StrEnum
+from ramalama.utils.logger import logger
 
 
 class RefFile:

@@ -1,6 +1,6 @@
 import subprocess
 
-from ramalama.common import MNT_DIR, perror, run_cmd
+from ramalama.utils.common import MNT_DIR, perror, run_cmd
 from ramalama.transports.base import NoRefFileFound, Transport
 
 prefix = "oci://"

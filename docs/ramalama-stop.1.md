@@ -34,7 +34,7 @@ $ ramalama stop --all
 ```
 
 ## SEE ALSO
-**[ramalama(1)](ramalama.1.md)**, **[ramalama-run(1)](ramalama-run.1.md)**, **[ramalama-serve(1)](ramalama-serve.1.md)**
+**[ramalama(1)](ramalama.1.md)**, **[ramalama-serve(1)](ramalama-serve.1.md)**
 
 
 ## HISTORY

@@ -6,9 +6,9 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
-from ramalama.common import perror, sanitize_filename, verify_checksum
-from ramalama.endian import EndianMismatchError, get_system_endianness
-from ramalama.logger import logger
+from ramalama.utils.common import perror, sanitize_filename, verify_checksum
+from ramalama.utils.endian import EndianMismatchError, get_system_endianness
+from ramalama.utils.logger import logger
 from ramalama.model_inspect.gguf_parser import GGUFInfoParser, GGUFModelInfo
 from ramalama.model_store import go2jinja
 from ramalama.model_store.constants import DIRECTORY_NAME_BLOBS, DIRECTORY_NAME_REFS, DIRECTORY_NAME_SNAPSHOTS
@@ -26,7 +26,7 @@ from ramalama.model_store.template_conversion import (
     ensure_jinja_openai_compatibility,
     is_openai_jinja,
 )
-from ramalama.path_utils import create_file_link
+from ramalama.utils.path_utils import create_file_link
 
 
 def map_to_store_file_type(snapshot_type: SnapshotFileType) -> StoreFileType:

@@ -1,0 +1,220 @@
+import os
+import platform
+from typing import Optional, Tuple
+
+from ramalama.utils.common import MNT_DIR, ContainerEntryPoint, get_accel_env_vars
+from ramalama.utils.file import PlainFile
+from ramalama.utils.path_utils import normalize_host_path_for_container
+from ramalama.version import version
+
+
+class Kube:
+    def __init__(
+        self,
+        model_name: str,
+        model_paths: Tuple[str, str],
+        chat_template_paths: Optional[Tuple[str, str]],
+        mmproj_paths: Optional[Tuple[str, str]],
+        args,
+        exec_args,
+        artifact: bool,
+    ):
+        self.src_model_path, self.dest_model_path = model_paths
+        self.src_chat_template_path, self.dest_chat_template_path = (
+            chat_template_paths if chat_template_paths is not None else ("", "")
+        )
+        self.src_mmproj_path, self.dest_mmproj_path = mmproj_paths if mmproj_paths is not None else ("", "")
+        self.src_model_path = self.src_model_path.removeprefix("oci://")
+
+        self.ai_image = model_name
+        if getattr(args, "name", None):
+            self.name = args.name
+        else:
+            self.name = "ramalama"
+
+        self.args = args
+        self.exec_args = exec_args
+        self.image = args.image
+        self.artifact = artifact
+
+    def _gen_volumes(self):
+        mounts = """\
+        volumeMounts:"""
+
+        volumes = """
+      volumes:"""
+        if os.path.exists(self.src_model_path):
+            m, v = self._gen_path_volume()
+            mounts += m
+            volumes += v
+        else:
+            subPath = ""
+            if not self.artifact:
+                subPath = """
+          subPath: /models"""
+            mounts += f"""
+        - mountPath: {MNT_DIR}{subPath}
+          name: model"""
+            volumes += self._gen_oci_volume()
+
+        if self.src_chat_template_path and os.path.exists(self.src_chat_template_path):
+            m, v = self._gen_chat_template_volume()
+            mounts += m
+            volumes += v
+
+        if self.src_mmproj_path and os.path.exists(self.src_mmproj_path):
+            m, v = self._gen_mmproj_volume()
+            mounts += m
+            volumes += v
+
+        m, v = self._gen_devices()
+        mounts += m
+        volumes += v
+        return mounts + volumes
+
+    def _gen_devices(self):
+        mounts = ""
+        volumes = ""
+        for dev in ["dri", "kfd"]:
+            if os.path.exists("/dev/" + dev):
+                mounts += f"""
+        - mountPath: /dev/{dev}
+          name: {dev}"""
+                volumes += f"""
+      - hostPath:
+          path: /dev/{dev}
+        name: {dev}"""
+        return mounts, volumes
+
+    def _gen_path_volume(self):
+        host_model_path = normalize_host_path_for_container(self.src_model_path)
+        if platform.system() == "Windows":
+            #  Workaround https://github.com/containers/podman/issues/16704
+            host_model_path = '/mnt' + host_model_path
+        mount = f"""
+        - mountPath: {self.dest_model_path}
+          name: model"""
+        volume = f"""
+      - hostPath:
+          path: {host_model_path}
+        name: model"""
+        return mount, volume
+
+    def _gen_oci_volume(self):
+        return f"""
+      - image:
+          reference: {self.src_model_path}
+          pullPolicy: IfNotPresent
+        name: model"""
+
+    def _gen_chat_template_volume(self):
+        host_chat_template_path = normalize_host_path_for_container(self.src_chat_template_path)
+        if platform.system() == "Windows":
+            #  Workaround https://github.com/containers/podman/issues/16704
+            host_chat_template_path = '/mnt' + host_chat_template_path
+        mount = f"""
+        - mountPath: {self.dest_chat_template_path}
+          name: chat_template"""
+        volume = f"""
+      - hostPath:
+          path: {host_chat_template_path}
+        name: chat_template"""
+        return mount, volume
+
+    def _gen_mmproj_volume(self):
+        host_mmproj_path = normalize_host_path_for_container(self.src_mmproj_path)
+        if platform.system() == "Windows":
+            #  Workaround https://github.com/containers/podman/issues/16704
+            host_mmproj_path = '/mnt' + host_mmproj_path
+        mount = f"""
+        - mountPath: {self.dest_mmproj_path}
+          name: mmproj"""
+        volume = f"""
+      - hostPath:
+          path: {host_mmproj_path}
+        name: mmproj"""
+        return mount, volume
+
+    def __gen_ports(self):
+        if not hasattr(self.args, "port"):
+            return ""
+
+        p = self.args.port.split(":", 2)
+        ports = f"""\
+        ports:
+        - containerPort: {p[0]}"""
+        if len(p) > 1:
+            ports += f"""
+          hostPort: {p[1]}"""
+
+        return ports
+
+    @staticmethod
+    def __gen_env_vars():
+        env_vars = get_accel_env_vars()
+
+        if not env_vars:
+            return ""
+
+        env_spec = """\
+        env:"""
+
+        for k, v in env_vars.items():
+            env_spec += f"""
+        - name: {k}
+          value: \"{v}\""""
+
+        return env_spec
+
+    def generate(self) -> PlainFile:
+        env_string = self.__gen_env_vars()
+        port_string = self.__gen_ports()
+        volume_string = self._gen_volumes()
+        _version = version()
+
+        content = f"""\
+# Save the output of this file and use kubectl create -f to import
+# it into Kubernetes.
+#
+# Created with ramalama-{_version}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {self.name}
+  labels:
+    app: {self.name}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {self.name}
+  template:
+    metadata:
+      labels:
+        app: {self.name}
+    spec:
+      containers:
+      - name: {self.name}
+        image: {self.image}
+"""
+        if not isinstance(self.exec_args[0], ContainerEntryPoint):
+            content += f"""\
+        command: ["{self.exec_args[0]}"]
+"""
+        content += f"""\
+        args: {self.exec_args[1:]}
+{env_string}
+{port_string}
+{volume_string}
+"""
+
+        return genfile(self.name, content)
+
+
+def genfile(name, content) -> PlainFile:
+    file_name = f"{name}.yaml"
+    print(f"Generating Kubernetes YAML file: {file_name}")
+
+    file = PlainFile(file_name)
+    file.content = content
+    return file

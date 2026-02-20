@@ -4,10 +4,10 @@ import shutil
 import urllib.error
 from typing import Optional
 
-from ramalama.common import available, perror
+from ramalama.utils.common import available, perror
 from ramalama.model_store.snapshot_file import SnapshotFile, SnapshotFileType
-from ramalama.ollama_repo_utils import fetch_manifest_data
-from ramalama.path_utils import create_file_link
+from ramalama.transports.ollama_utils import fetch_manifest_data
+from ramalama.utils.path_utils import create_file_link
 from ramalama.transports.base import Transport
 
 

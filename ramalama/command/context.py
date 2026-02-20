@@ -2,8 +2,8 @@ import argparse
 import os
 from typing import Optional
 
-from ramalama.common import get_accel
-from ramalama.console import should_colorize
+from ramalama.utils.common import get_accel
+from ramalama.utils.console import should_colorize
 from ramalama.transports.transport_factory import CLASS_MODEL_TYPES, New
 
 

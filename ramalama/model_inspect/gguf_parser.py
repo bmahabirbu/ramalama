@@ -3,8 +3,8 @@ import struct
 from enum import IntEnum
 from typing import Any, Dict, cast
 
-from ramalama.endian import GGUFEndian
-from ramalama.logger import logger
+from ramalama.utils.endian import GGUFEndian
+from ramalama.utils.logger import logger
 from ramalama.model_inspect.error import ParseError
 from ramalama.model_inspect.gguf_info import GGUFModelInfo, GGUFModelMetadata, Tensor
 

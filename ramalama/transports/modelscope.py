@@ -1,15 +1,15 @@
 import json
 import os
 
-from ramalama.common import available, run_cmd
-from ramalama.hf_style_repo_base import (
+from ramalama.utils.common import available, run_cmd
+from ramalama.transports.hf_repo_base import (
     HFStyleRepoFile,
     HFStyleRepoModel,
     HFStyleRepository,
     fetch_checksum_from_api_base,
 )
 from ramalama.model_store.snapshot_file import SnapshotFileType
-from ramalama.path_utils import create_file_link
+from ramalama.utils.path_utils import create_file_link
 
 missing_modelscope = """This operation requires modelscope which is not available.
 

@@ -3,14 +3,14 @@ import os
 import urllib.request
 from pathlib import Path
 
-from ramalama.common import run_cmd
-from ramalama.hf_style_repo_base import (
+from ramalama.utils.common import run_cmd
+from ramalama.transports.hf_repo_base import (
     HFStyleRepoFile,
     HFStyleRepoModel,
     HFStyleRepository,
     fetch_checksum_from_api_base,
 )
-from ramalama.logger import logger
+from ramalama.utils.logger import logger
 
 missing_huggingface = """This operation requires huggingface-cli which is not available.
 

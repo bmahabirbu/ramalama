@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from functools import cached_property
 from typing import Optional
 
-from ramalama.common import (
+from ramalama.utils.common import (
     MNT_DIR,
     MNT_FILE_DRAFT,
     ContainerEntryPoint,
@@ -19,15 +19,15 @@ from ramalama.common import (
     populate_volume_from_image,
     set_accel_env_vars,
 )
-from ramalama.compose import Compose
+from ramalama.runtime.compose import Compose
 from ramalama.config import get_config
-from ramalama.engine import Engine, dry_run, is_healthy, wait_for_healthy
-from ramalama.kube import Kube
-from ramalama.logger import logger
+from ramalama.runtime.engine import Engine, dry_run, is_healthy, wait_for_healthy
+from ramalama.runtime.kube import Kube
+from ramalama.utils.logger import logger
 from ramalama.model_store.global_store import GlobalModelStore
 from ramalama.model_store.store import ModelStore
-from ramalama.path_utils import get_container_mount_path
-from ramalama.quadlet import Quadlet
+from ramalama.utils.path_utils import get_container_mount_path
+from ramalama.runtime.quadlet import Quadlet
 
 MODEL_TYPES = ["file", "https", "http", "oci", "huggingface", "hf", "modelscope", "ms", "ollama", "rlcr"]
 
@@ -47,10 +47,6 @@ $(error)s"""
 
 
 class NoGGUFModelFileFound(Exception):
-    pass
-
-
-class SafetensorModelNotSupported(Exception):
     pass
 
 

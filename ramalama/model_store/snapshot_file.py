@@ -2,9 +2,9 @@ import os
 from enum import IntEnum
 from typing import Dict, Sequence
 
-from ramalama.common import generate_sha256_binary, perror
-from ramalama.http_client import download_file
-from ramalama.logger import logger
+from ramalama.utils.common import generate_sha256_binary, perror
+from ramalama.utils.http_client import download_file
+from ramalama.utils.logger import logger
 
 
 class SnapshotFileType(IntEnum):

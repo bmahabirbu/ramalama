@@ -3,9 +3,9 @@ import re
 import shutil
 from pathlib import Path
 
-from ramalama.common import SPLIT_MODEL_PATH_RE, generate_sha256, is_split_file_model
+from ramalama.utils.common import SPLIT_MODEL_PATH_RE, generate_sha256, is_split_file_model
 from ramalama.model_store.snapshot_file import SnapshotFile, SnapshotFileType
-from ramalama.path_utils import normalize_host_path_for_container
+from ramalama.utils.path_utils import normalize_host_path_for_container
 from ramalama.transports.base import Transport
 from ramalama.transports.huggingface import HuggingfaceRepository
 from ramalama.transports.modelscope import ModelScopeRepository
