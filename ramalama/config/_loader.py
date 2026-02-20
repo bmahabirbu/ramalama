@@ -173,7 +173,7 @@ class HTTPClientConfig:
 class BaseConfig:
     cache_reuse: int = 256
     container: bool = None  # type: ignore
-    ctx_size: int = 0
+    ctx_size: int = 4096
     default_image: str = DEFAULT_IMAGE
     dryrun: bool = False
     engine: SUPPORTED_ENGINES | None = field(default_factory=get_default_engine)
