@@ -28,46 +28,20 @@ class TestEngine(unittest.TestCase):
         self.assertEqual(engine.use_docker, False)
 
     def test_add_container_labels(self):
-        args = Namespace(**vars(self.base_args), MODEL="test-model", port="8080", subcommand="run")
+        args = Namespace(**vars(self.base_args), MODEL="test-model", port="8080", subcommand="serve")
         engine = ramalama.engine.Engine(args)
         exec_args = engine.exec_args
-        self.assertNotIn("--rm", exec_args)
+        self.assertIn("--rm", exec_args)
         self.assertIn("--label", exec_args)
         self.assertIn("ai.ramalama.model=test-model", exec_args)
         self.assertIn("ai.ramalama.port=8080", exec_args)
-        self.assertIn("ai.ramalama.command=run", exec_args)
+        self.assertIn("ai.ramalama.command=serve", exec_args)
 
     def test_serve_rm(self):
         args = Namespace(**vars(self.base_args), MODEL="test-model", port="8080", subcommand="serve")
         engine = ramalama.engine.Engine(args)
         exec_args = engine.exec_args
         self.assertIn("--rm", exec_args)
-
-    @patch('os.access')
-    @patch('ramalama.engine.check_nvidia')
-    def test_add_oci_runtime_nvidia(self, mock_check_nvidia, mock_os_access):
-        mock_check_nvidia.return_value = "cuda"
-        mock_os_access.return_value = True
-
-        # Test Podman
-        podman_engine = ramalama.engine.Engine(self.base_args)
-        self.assertIn("--runtime", podman_engine.exec_args)
-        self.assertIn("/usr/bin/nvidia-container-runtime", podman_engine.exec_args)
-
-        # Test Podman when nvidia-container-runtime executable is missing
-        # This is expected with the official package
-        mock_os_access.return_value = False
-        podman_engine = ramalama.engine.Engine(self.base_args)
-        self.assertNotIn("--runtime", podman_engine.exec_args)
-        self.assertNotIn("/usr/bin/nvidia-container-runtime", podman_engine.exec_args)
-
-        # Test Docker
-        args = self.base_args
-        args.engine = "docker"
-        docker_args = Namespace(**vars(args))
-        docker_engine = ramalama.engine.Engine(docker_args)
-        self.assertIn("--runtime", docker_engine.exec_args)
-        self.assertIn("nvidia", docker_engine.exec_args)
 
     def test_add_privileged_options(self):
         # Test non-privileged (default)

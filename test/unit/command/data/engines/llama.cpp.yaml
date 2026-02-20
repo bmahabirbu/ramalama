@@ -90,16 +90,11 @@ commands:
         - name: ""
           description: "Arbitrary runtime arguments for llama-server"
           value: "{{ args.runtime_args }}"
-  - name: run
+  - name: bench
     inference_engine:
-      name: "llama-server with chat"
-      binary: "llama-server"
-      options: *serve_run_options
-  - name: perplexity
-    inference_engine:
-      name: "llama-perplexity"
-      binary: "llama-perplexity"
-      options: &bench_perplexity_options
+      name: "llama-bench"
+      binary: "llama-bench"
+      options:
         - name: "--model"
           description: "The AI model to run"
           value: "{{ model.model_path }}"
@@ -112,8 +107,3 @@ commands:
         - name: "--threads"
           description: "Number of Threads to use during generation"
           value: "{{ args.threads }}"
-  - name: bench
-    inference_engine:
-      name: "llama-bench"
-      binary: "llama-bench"
-      options: *bench_perplexity_options

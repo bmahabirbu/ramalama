@@ -147,7 +147,7 @@ def test_command_factory_missing_spec(spec_files: dict[str, Path], schema_files:
     factory = CommandFactory(spec_files, schema_files)
     runtime = "non-existing-runtime"
     with pytest.raises(FileNotFoundError) as ex:
-        factory.create(runtime, "run", None)
+        factory.create(runtime, "serve", None)
     assert ex.match(f"No specification file found for runtime '{runtime}' ")
 
 
@@ -155,7 +155,7 @@ def test_command_factory_spec_missing_version(spec_files: dict[str, Path], schem
     factory = CommandFactory(spec_files, schema_files)
     runtime = "llama.cpp.missing.version"
     with pytest.raises(InvalidInferenceEngineSpecError) as ex:
-        factory.create(runtime, "run", None)
+        factory.create(runtime, "serve", None)
     assert ex.match("Missing required field 'schema_version'")
 
 
@@ -163,7 +163,7 @@ def test_command_factory_spec_invalid(spec_files: dict[str, Path], schema_files:
     factory = CommandFactory(spec_files, schema_files)
     runtime = "llama.cpp.invalid"
     with pytest.raises(InvalidInferenceEngineSpecError) as ex:
-        factory.create(runtime, "run", None)
+        factory.create(runtime, "serve", None)
     assert ex.match("'binary' is a required property.*")
 
 
@@ -178,5 +178,5 @@ def test_command_factory_spec_unknown_operation(spec_files: dict[str, Path], sch
 def test_command_factory_missing_schema(spec_files: dict[str, Path]):
     factory = CommandFactory(spec_files, {})
     with pytest.raises(FileNotFoundError) as ex:
-        factory.create("llama.cpp", "run", None)
+        factory.create("llama.cpp", "serve", None)
     assert ex.match("No schema file found for spec version '1.0.0' ")

@@ -12,7 +12,6 @@ class Args:
     def __init__(
         self,
         name: str = "",
-        rag: str = "",
         port: str = "",
         host: str = "0.0.0.0",
         env: list = [],
@@ -20,7 +19,6 @@ class Args:
         add_to_unit=None,
     ):
         self.name = name
-        self.rag = rag
         self.env = env
         self.port = port
         self.host = host
@@ -193,17 +191,6 @@ DATA_PATH = Path(__file__).parent / "data" / "test_quadlet"
                 model_file_exists=False,
             ),
             DATA_PATH / "oci_port",
-        ),
-        (
-            Input(
-                model_name="oci-model-rag",
-                model_src_blob="oci://registry.example.com/model:latest",
-                model_dest_name="/mnt/models/model.file",
-                image="testimage",
-                args=Args(rag="oci://registry.example.com/rag:latest"),
-                model_file_exists=False,
-            ),
-            DATA_PATH / "oci_rag",
         ),
         (
             Input(

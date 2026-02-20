@@ -278,7 +278,7 @@ class TestLoadEnvConfig:
         env = {
             "RAMALAMA_USER__NO_MISSING_GPU_PROMPT": "true",
             "RAMALAMA_SETTINGS__CONFIG_FILES": ["/path/to/config"],
-            "RAMALAMA_IMAGES": '{"CUDA_VISIBLE_DEVICES": "custom/cuda:latest"}',
+            "RAMALAMA_IMAGES": '{"GGML_VK_VISIBLE_DEVICES": "custom/vulkan:latest"}',
         }
 
         result = load_env_config(env)
@@ -286,7 +286,7 @@ class TestLoadEnvConfig:
         expected = {
             "user": {"no_missing_gpu_prompt": "true"},
             "settings": {"config_files": ["/path/to/config"]},
-            "images": {"CUDA_VISIBLE_DEVICES": "custom/cuda:latest"},
+            "images": {"GGML_VK_VISIBLE_DEVICES": "custom/vulkan:latest"},
         }
 
         assert result == expected
@@ -488,28 +488,16 @@ class TestLoadEnvConfig:
         """Debug test to see what load_env_config returns for images."""
         env = {
             "RAMALAMA_IMAGES": (
-                '{"CUDA_VISIBLE_DEVICES": "custom/cuda:latest", "INTEL_VISIBLE_DEVICES": "custom/intel:latest"}'
+                '{"GGML_VK_VISIBLE_DEVICES": "custom/vulkan:latest"}'
             ),
         }
 
         result = load_env_config(env)
-        print(f"load_env_config result: {result}")
 
-        # Should contain the parsed images dict
         assert "images" in result
         assert result["images"] == {
-            "CUDA_VISIBLE_DEVICES": "custom/cuda:latest",
-            "INTEL_VISIBLE_DEVICES": "custom/intel:latest",
+            "GGML_VK_VISIBLE_DEVICES": "custom/vulkan:latest",
         }
-
-    def test_stack_image(self):
-        """Test that the llama-stack image can be set from an env var."""
-        env = {
-            "RAMALAMA_STACK_IMAGE": "custom/llama-stack:latest",
-        }
-        result = load_env_config(env)
-        assert "stack_image" in result
-        assert result["stack_image"] == "custom/llama-stack:latest"
 
 
 class TestConfigIntegration:
@@ -521,7 +509,7 @@ class TestConfigIntegration:
             "RAMALAMA_USER__NO_MISSING_GPU_PROMPT": "true",
             "RAMALAMA_SETTINGS__CONFIG_FILES": ["/custom/config.toml"],
             "RAMALAMA_IMAGES": (
-                '{"CUDA_VISIBLE_DEVICES": "custom/cuda:latest", "HIP_VISIBLE_DEVICES": "custom/rocm:latest"}'
+                '{"GGML_VK_VISIBLE_DEVICES": "custom/vulkan:latest"}'
             ),
         }
 
@@ -530,8 +518,7 @@ class TestConfigIntegration:
 
             assert cfg.user.no_missing_gpu_prompt is True
             assert cfg.settings.config_files == ["/custom/config.toml"]
-            assert cfg.images["CUDA_VISIBLE_DEVICES"] == "custom/cuda:latest"
-            assert cfg.images["HIP_VISIBLE_DEVICES"] == "custom/rocm:latest"
+            assert cfg.images["GGML_VK_VISIBLE_DEVICES"] == "custom/vulkan:latest"
 
             assert cfg.is_set("user") is True
             assert cfg.is_set("settings") is True
@@ -543,25 +530,23 @@ class TestConfigIntegration:
             "image": "file/image:latest",
             "threads": 4,
             "user": {"no_missing_gpu_prompt": False},
-            "images": {"CUDA_VISIBLE_DEVICES": "file/cuda:latest"},
+            "images": {"GGML_VK_VISIBLE_DEVICES": "file/vulkan:latest"},
         }
 
         env = {
             "RAMALAMA_IMAGE": "env/image:latest",
             "RAMALAMA_THREADS": "8",
             "RAMALAMA_USER__NO_MISSING_GPU_PROMPT": "true",
-            "RAMALAMA_IMAGES": '{"CUDA_VISIBLE_DEVICES": "env/cuda:latest"}',
+            "RAMALAMA_IMAGES": '{"GGML_VK_VISIBLE_DEVICES": "env/vulkan:latest"}',
         }
 
         with patch("ramalama.config.load_file_config", return_value=file_config):
             cfg = default_config(env)
 
-            # Environment should override file config
             assert cfg.image == "env/image:latest"
             assert cfg.threads == 8
             assert cfg.user.no_missing_gpu_prompt is True
-            assert cfg.images["CUDA_VISIBLE_DEVICES"] == "env/cuda:latest"
-            assert cfg.images["HIP_VISIBLE_DEVICES"] == "quay.io/ramalama/rocm"
+            assert cfg.images["GGML_VK_VISIBLE_DEVICES"] == "env/vulkan:latest"
 
     def test_config_multiple_env_layers(self):
         """Test that multiple environment variable layers work correctly."""
@@ -569,7 +554,7 @@ class TestConfigIntegration:
             "RAMALAMA_IMAGE": "base/image:latest",
             "RAMALAMA_THREADS": "4",
             "RAMALAMA_USER__NO_MISSING_GPU_PROMPT": "false",
-            "RAMALAMA_IMAGES": '{"CUDA_VISIBLE_DEVICES": "base/cuda:latest"}',
+            "RAMALAMA_IMAGES": '{"GGML_VK_VISIBLE_DEVICES": "base/vulkan:latest"}',
             "RAMALAMA_APP__DATABASE__HOST": "localhost",
             "RAMALAMA_APP__DATABASE__PORT": "5432",
         }
@@ -577,11 +562,10 @@ class TestConfigIntegration:
         with patch("ramalama.config.load_file_config", return_value={}):
             cfg = default_config(env)
 
-            # Basic config should work
             assert cfg.image == "base/image:latest"
             assert cfg.threads == 4
             assert cfg.user.no_missing_gpu_prompt is False
-            assert cfg.images["CUDA_VISIBLE_DEVICES"] == "base/cuda:latest"
+            assert cfg.images["GGML_VK_VISIBLE_DEVICES"] == "base/vulkan:latest"
 
             # Arbitrary nested config should be available
             # Note: This would require the config to support arbitrary fields
@@ -639,8 +623,7 @@ class TestConfigIntegration:
         """Test a complex real-world nesting scenario."""
         file_config = {
             "images": {
-                "CUDA_VISIBLE_DEVICES": "quay.io/ramalama/cuda:latest",
-                "HIP_VISIBLE_DEVICES": "quay.io/ramalama/rocm:latest",
+                "GGML_VK_VISIBLE_DEVICES": "quay.io/ramalama/vulkan:latest",
             },
             "user": {"no_missing_gpu_prompt": False},
         }
@@ -649,7 +632,7 @@ class TestConfigIntegration:
             "RAMALAMA_IMAGE": "custom/ramalama:latest",
             "RAMALAMA_THREADS": "8",
             "RAMALAMA_IMAGES": (
-                '{"CUDA_VISIBLE_DEVICES": "custom/cuda:latest", "INTEL_VISIBLE_DEVICES": "custom/intel:latest"}'
+                '{"GGML_VK_VISIBLE_DEVICES": "custom/vulkan:latest"}'
             ),
             "RAMALAMA_USER__NO_MISSING_GPU_PROMPT": "true",
             "RAMALAMA_APP__LOGGING__LEVEL": "debug",
@@ -659,17 +642,13 @@ class TestConfigIntegration:
         with patch("ramalama.config.load_file_config", return_value=file_config):
             cfg = default_config(env)
 
-            # Verify the merged configuration
             assert cfg.image == "custom/ramalama:latest"
             assert cfg.threads == 8
             assert cfg.user.no_missing_gpu_prompt is True
 
-            # Deep merged images
             expected_images = RamalamaImages(
                 **{
-                    "CUDA_VISIBLE_DEVICES": "custom/cuda:latest",  # from env
-                    "INTEL_VISIBLE_DEVICES": "custom/intel:latest",  # from env
-                    "HIP_VISIBLE_DEVICES": "quay.io/ramalama/rocm:latest",  # from file config
+                    "GGML_VK_VISIBLE_DEVICES": "custom/vulkan:latest",
                 }
             )
             assert cfg.images == expected_images

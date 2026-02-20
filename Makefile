@@ -131,11 +131,6 @@ format:
 codespell:
 	codespell $(PROJECT_DIR) $(PYTHON_SCRIPTS)
 
-.PHONY: test-run
-test-run:
-	_RAMALAMA_TEST=local RAMALAMA=$(CURDIR)/bin/ramalama bats -T test/system/030-run.bats
-	_RAMALAMA_OPTIONS=--nocontainer _RAMALAMA_TEST=local bats -T test/system/030-run.bats
-
 .PHONY: man-check
 man-check:
 ifeq ($(OS),Linux)
@@ -159,18 +154,6 @@ pypi-build:   clean
 .PHONY: pypi
 pypi: pypi-build
 	python3 -m twine upload dist/*
-
-.PHONY: bats
-bats:
-	RAMALAMA=$(CURDIR)/bin/ramalama bats -T test/system/
-
-.PHONY: bats-nocontainer
-bats-nocontainer:
-	_RAMALAMA_TEST_OPTS=--nocontainer RAMALAMA=$(CURDIR)/bin/ramalama bats -T test/system/
-
-.PHONY: bats-docker
-bats-docker:
-	_RAMALAMA_TEST_OPTS=--engine=docker RAMALAMA=$(CURDIR)/bin/ramalama bats -T test/system/
 
 .PHONY: e2e-image
 e2e-image:

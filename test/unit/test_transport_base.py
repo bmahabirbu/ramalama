@@ -216,59 +216,6 @@ class TestMLXRuntime:
         # Should not raise any exception
         model.validate_args(args)
 
-    @patch('ramalama.transports.base.platform.system')
-    @patch('ramalama.transports.base.platform.machine')
-    @patch('ramalama.transports.base.Transport.serve_nonblocking', return_value=MagicMock())
-    @patch('ramalama.chat.chat')
-    @patch('socket.socket')
-    def test_mlx_run_uses_server_client_model(
-        self, mock_socket_class, mock_chat, mock_serve_nonblocking, mock_machine, mock_system
-    ):
-        """Test that MLX runtime uses server-client model in run method"""
-        mock_system.return_value = "Darwin"
-        mock_machine.return_value = "arm64"
-
-        # Mock socket to simulate successful connection (server ready)
-        mock_socket = MagicMock()
-        mock_socket.connect_ex.return_value = 0  # Successful connection
-        mock_socket.__enter__.return_value = mock_socket
-        mock_socket.__exit__.return_value = False
-        mock_socket_class.return_value = mock_socket
-
-        # Add all required arguments for the run method
-        args = Namespace(
-            subcommand="run",
-            runtime="mlx",
-            container=False,
-            privileged=False,
-            debug=False,
-            MODEL="test-model",
-            ARGS=None,  # No prompt arguments
-            pull="missing",  # Required for get_model_path
-            dryrun=True,  # use dryrun to avoid file system checks
-            store="/tmp/store",
-            port="8080",
-            engine="podman",
-        )
-
-        model = Transport(args.MODEL, args.store)
-        cmd = assemble_command(args)
-
-        with patch.object(model, 'get_container_name', return_value="test-container"):
-            with patch('sys.stdin.isatty', return_value=True):  # Mock tty for interactive mode
-                model.run(args, cmd)
-
-        # Verify that chat.chat was called (parent process)
-        mock_chat.assert_called_once()
-
-        # Verify that serve_nonblocking was called (indicating server-client model) and that the server_process is set
-        mock_serve_nonblocking.assert_called_once()
-        assert mock_chat.call_args[0][0].server_process == mock_serve_nonblocking.return_value
-
-        # Verify args were set up correctly for server-client model
-        # MLX runtime uses OpenAI-compatible endpoints under /v1
-        assert args.url == "http://127.0.0.1:8080/v1"
-
 
 class TestOCIModelSetupMounts:
     """Test the OCI model setup_mounts functionality that was refactored"""

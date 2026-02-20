@@ -9,10 +9,9 @@ from ramalama.compose import Compose, genfile
 
 class Args:
     def __init__(
-        self, name: str = "", rag: str = "", port: str = "", env: list = None, image: str = "test-image/ramalama:latest"
+        self, name: str = "", port: str = "", env: list = None, image: str = "test-image/ramalama:latest"
     ):
         self.name = name
-        self.rag = rag
         self.env = env if env is not None else []
         if port:
             self.port = port
@@ -86,24 +85,6 @@ DATA_PATH = Path(__file__).parent / "data" / "test_compose"
         ),
         (
             Input(
-                model_name="granite",
-                model_src_path="/models/granite.gguf",
-                model_dest_path="/mnt/models/granite.gguf",
-                args=Args(rag="oci:quay.io/my-org/my-rag-data:latest"),
-            ),
-            "with_rag_oci.yaml",
-        ),
-        (
-            Input(
-                model_name="granite",
-                model_src_path="/models/granite.gguf",
-                model_dest_path="/mnt/models/granite.gguf",
-                args=Args(rag="/data/rag_files"),
-            ),
-            "with_rag_path.yaml",
-        ),
-        (
-            Input(
                 model_name="tinyllama",
                 model_src_path="/models/tinyllama.gguf",
                 model_dest_path="/mnt/models/tinyllama.gguf",
@@ -163,7 +144,6 @@ def test_compose_generate(input_data: Input, expected_file_name: str, monkeypatc
         input_data.model_src_path: input_data.model_file_exists,
         input_data.chat_template_src_path: input_data.chat_template_file_exists,
         input_data.mmproj_src_path: input_data.mmproj_file_exists,
-        "/data/rag_files": True,
         "/dev/dri": True,
         "/dev/kfd": True,
         "/dev/accel": True,
@@ -224,7 +204,6 @@ def test_compose_no_port_arg(monkeypatch):
     class ArgsNoPort:
         def __init__(self):
             self.image = "test-image"
-            self.rag = ""
             self.env = []
             self.name = "no-port-test"
 

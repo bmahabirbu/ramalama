@@ -65,7 +65,7 @@ class OCI(Transport):
             engine.add_volume(srcdir, "/model")
             engine.add_volume(outdir.name, "/output", opts="rw")
             args.model = source_model
-            engine.add_args(args.rag_image)
+            engine.add_args(args.image)
             # import here to avoid circular references
             from ramalama.command.factory import assemble_command
 

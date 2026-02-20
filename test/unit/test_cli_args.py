@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ramalama.arg_types import ChatSubArgs, DefaultArgs
+from ramalama.arg_types import DefaultArgs
 from ramalama.cli import get_parser
 from ramalama.config import SUPPORTED_ENGINES
 
@@ -58,7 +58,7 @@ special_cases = {
 def args_to_cli_args(args_obj, subcommand: str | None, special_cases: dict | None = None) -> list:
     """
     Convert a dataclass instance to CLI arguments for argparse.
-    - subcommand: the CLI subcommand (e.g., 'chat')
+    - subcommand: the CLI subcommand (e.g., 'serve')
     - special_cases: dict mapping attribute names to CLI flag names (e.g., {'api_key': 'api-key'})
     """
     if special_cases is None:
@@ -102,29 +102,11 @@ def args_to_cli_args(args_obj, subcommand: str | None, special_cases: dict | Non
         quiet=st.just(False),
     )
 )
-def test_default_endpoint(chatargs):
-    cli_args = args_to_cli_args(chatargs, None, special_cases)
+def test_default_endpoint(defaultargs):
+    cli_args = args_to_cli_args(defaultargs, None, special_cases)
     args = parser.parse_args(cli_args)
 
     for field in DefaultArgs.__dataclass_fields__:
         assert hasattr(args, field), f"Missing attribute: {field}"
 
 
-@pytest.mark.skipif(not HAS_HYPOTHESIS, reason="Hypothesis is not installed")
-@given(
-    st.builds(
-        ChatSubArgs,
-        prefix=st.sampled_from(['> ', '🦙 > ', '🦭 > ', '🐋 > ']),
-        url=st.sampled_from(['https://test.com', 'test.com']),
-        temp=st.one_of(
-            st.none(),
-            st.floats(min_value=0, allow_nan=False, allow_infinity=False).map(lambda v: 0.0 if v == 0 else v),
-        ),
-    )
-)
-def test_chat_endpoint(chatargs):
-    cli_args = args_to_cli_args(chatargs, 'chat', special_cases)
-    args = parser.parse_args(cli_args)
-
-    for field in ChatSubArgs.__dataclass_fields__:
-        assert hasattr(args, field), f"Missing attribute: {field}"

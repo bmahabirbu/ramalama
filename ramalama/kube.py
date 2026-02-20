@@ -2,7 +2,7 @@ import os
 import platform
 from typing import Optional, Tuple
 
-from ramalama.common import MNT_DIR, RAG_DIR, ContainerEntryPoint, get_accel_env_vars
+from ramalama.common import MNT_DIR, ContainerEntryPoint, get_accel_env_vars
 from ramalama.file import PlainFile
 from ramalama.path_utils import normalize_host_path_for_container
 from ramalama.version import version
@@ -57,11 +57,6 @@ class Kube:
           name: model"""
             volumes += self._gen_oci_volume()
 
-        if self.args.rag:
-            m, v = self._gen_rag_volume()
-            mounts += m
-            volumes += v
-
         if self.src_chat_template_path and os.path.exists(self.src_chat_template_path):
             m, v = self._gen_chat_template_volume()
             mounts += m
@@ -111,19 +106,6 @@ class Kube:
           reference: {self.src_model_path}
           pullPolicy: IfNotPresent
         name: model"""
-
-    def _gen_rag_volume(self):
-        mounts = f"""
-        - mountPath: {RAG_DIR}
-          name: rag"""
-
-        volumes = f"""
-      - image:
-          reference: {self.args.rag}
-          pullPolicy: IfNotPresent
-        name: rag"""
-
-        return mounts, volumes
 
     def _gen_chat_template_volume(self):
         host_chat_template_path = normalize_host_path_for_container(self.src_chat_template_path)

@@ -1,17 +1,13 @@
-import copy
 import json
 import os
 import platform
 import random
 import socket
 import subprocess
-import sys
-import time
 from abc import ABC, abstractmethod
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
-from ramalama import chat
 from ramalama.common import ContainerEntryPoint
 from ramalama.compose import Compose
 from ramalama.config import get_config
@@ -25,9 +21,6 @@ from ramalama.model_inspect.safetensor_parser import SafetensorInfoParser
 from ramalama.model_store.global_store import GlobalModelStore
 from ramalama.model_store.store import ModelStore
 from ramalama.quadlet import Quadlet
-
-if TYPE_CHECKING:
-    from ramalama.chat import ChatOperationalArgs
 
 from datetime import datetime, timezone
 
@@ -120,14 +113,6 @@ class TransportBase(ABC):
     @abstractmethod
     def bench(self, args, cmd: list[str]):
         raise self.__not_implemented_error("bench")
-
-    @abstractmethod
-    def run(self, args, cmd: list[str]):
-        raise self.__not_implemented_error("run")
-
-    @abstractmethod
-    def perplexity(self, args, cmd: list[str]):
-        raise self.__not_implemented_error("perplexity")
 
     @abstractmethod
     def serve(self, args, cmd: list[str]):
@@ -391,8 +376,6 @@ class Transport(TransportBase):
             args.UNRESOLVED_MODEL = args.MODEL
             args.MODEL = self.resolve_model()
         self.engine = self.new_engine(args)
-        if args.subcommand == "run" and not getattr(args, "ARGS", None) and sys.stdin.isatty():
-            self.engine.add(["-i"])
 
         self.engine.add(
             [
@@ -518,18 +501,6 @@ class Transport(TransportBase):
             bench_manager = BenchmarksManager(config.benchmarks.storage_folder)
             bench_manager.save(results)
 
-    def run(self, args, cmd: list[str]):
-        # The Run command will first launch a daemonized service
-        # and run chat to communicate with it.
-
-        if len(cmd) > 0 and isinstance(cmd[0], ContainerEntryPoint):
-            # Ignore entrypoint
-            cmd = cmd[1:]
-
-        process = self.serve_nonblocking(args, cmd)
-        if process:
-            return self._connect_and_chat(args, process)
-
     def serve_nonblocking(self, args, cmd: list[str]) -> subprocess.Popen | None:
         if args.container:
             args.name = self.get_container_name(args)
@@ -566,113 +537,8 @@ class Transport(TransportBase):
         )
         return process
 
-    def _connect_and_chat(self, args, server_process):
-        """Connect to the server and start chat in the parent process."""
-        args.url = f"http://127.0.0.1:{args.port}/v1"
-        if getattr(args, "runtime", None) == "mlx":
-            args.prefix = "🍏 > "
-
-        # Model name in the chat request must match RamalamaModelContext.alias()
-        chat_args = copy.deepcopy(args)
-        chat_args.model = f"{self.model_organization}/{self.model_name}"
-
-        if args.container:
-            return self._handle_container_chat(chat_args, server_process)
-        else:
-            # Store the Popen object for monitoring
-            chat_args.server_process = server_process
-
-            if getattr(chat_args, "runtime", None) == "mlx":
-                return self._handle_mlx_chat(chat_args)
-            chat.chat(chat_args)
-            return 0
-
-    def chat_operational_args(self, args) -> "ChatOperationalArgs | None":
-        return None
-
     def wait_for_healthy(self, args):
         wait_for_healthy(args, is_healthy)
-
-    def _handle_container_chat(self, args, server_process):
-        """Handle chat for container-based execution."""
-
-        # Wait for the server process to complete (blocking)
-        exit_code = server_process.wait()
-        if exit_code != 0:
-            raise ValueError(f"Failed to serve model {self.model_name}, for ramalama run command")
-
-        if not args.dryrun:
-            try:
-                self.wait_for_healthy(args)
-            except subprocess.TimeoutExpired as e:
-                logger.error(f"Failed to serve model {self.model_name}, for ramalama run command")
-                logger.error(f"{e}: logs: {e.output}")
-                raise
-
-        args.ignore = getattr(args, "dryrun", False)
-        for i in range(6):
-            try:
-                chat.chat(args, self.chat_operational_args(args))
-                break
-            except Exception as e:
-                if i >= 5:
-                    raise e
-                time.sleep(1)
-        return 0
-
-    def _handle_mlx_chat(self, args):
-        """Handle chat for MLX runtime with connection retries."""
-        args.ignore = getattr(args, "dryrun", False)
-        args.initial_connection = True
-        max_retries = 10
-
-        for i in range(max_retries):
-            try:
-                if self._is_server_ready(args.port):
-                    args.initial_connection = False
-                    time.sleep(1)  # Give server time to stabilize
-                    chat.chat(args)
-                    break
-                else:
-                    logger.debug(f"MLX server not ready, waiting... (attempt {i + 1}/{max_retries})")
-                    time.sleep(3)
-                    continue
-
-            except Exception as e:
-                if i >= max_retries - 1:
-                    perror(f"Error: Failed to connect to MLX server after {max_retries} attempts: {e}")
-                    self._cleanup_server_process(args.server_process)
-                    raise e
-                logger.debug(f"Connection attempt failed, retrying... (attempt {i + 1}/{max_retries}): {e}")
-                time.sleep(3)
-
-        args.initial_connection = False
-        return 0
-
-    def _is_server_ready(self, port):
-        """Check if the server is ready to accept connections."""
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.settimeout(2)
-                result = s.connect_ex(('127.0.0.1', int(port)))
-                return result == 0
-        except (socket.error, ValueError):
-            return False
-
-    def _cleanup_server_process(self, process):
-        """Clean up the server process."""
-        if not process:
-            return
-
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-
-    def perplexity(self, args, cmd: list[str]):
-        set_accel_env_vars()
-        self.execute_command(cmd, args)
 
     def exists(self) -> bool:
         _, _, all = self.model_store.get_cached_files(self.model_tag)
@@ -786,11 +652,7 @@ class Transport(TransportBase):
             self.generate_container_config(args, cmd)
             return
 
-        try:
-            self.execute_command(cmd, args)
-        except Exception as e:
-            self._cleanup_server_process(args.server_process)
-            raise e
+        self.execute_command(cmd, args)
 
     def quadlet(self, model_paths, chat_template_paths, mmproj_paths, args, exec_args, output_dir, model_parts=None):
         quadlet = Quadlet(
@@ -907,10 +769,4 @@ def compute_serving_port(args, quiet: bool = False, exclude: list[str] | None = 
 
     if target_port == 0:
         raise IOError("no available port could be detected. Please ensure you have enough free ports.")
-    if not quiet:
-        openai = f"http://localhost:{target_port}"
-        if args.api == "llama-stack":
-            perror(f"Llama Stack RESTAPI: {openai}")
-            openai = openai + "/v1/openai"
-            perror(f"OpenAI RESTAPI: {openai}")
     return str(target_port)

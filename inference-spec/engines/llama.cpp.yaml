@@ -90,28 +90,6 @@ commands:
         - name: ""
           description: "Arbitrary runtime arguments for llama-server"
           value: "{{ args.runtime_args }}"
-  - name: run
-    inference_engine:
-      name: "llama-server with chat"
-      binary: "llama-server"
-      options: *serve_run_options
-  - name: perplexity
-    inference_engine:
-      name: "llama-perplexity"
-      binary: "llama-perplexity"
-      options: &bench_perplexity_options
-        - name: "--model"
-          description: "The AI model to run"
-          value: "{{ model.model_path }}"
-        - name: "-ngl"
-          description: "Number of layers to offload to the GPU if available"
-          value: "{{ 999 if args.ngl < 0 else args.ngl }}"
-        - name: "-ngld"
-          description: "Number of layers to offload to the GPU if available"
-          value: "{{ None if not args.model_draft else 999 if args.ngl < 0 else args.ngl }}"
-        - name: "--threads"
-          description: "Number of Threads to use during generation"
-          value: "{{ args.threads }}"
   - name: bench
     inference_engine:
       name: "llama-bench"
@@ -132,57 +110,6 @@ commands:
         - name: "-o"
           description: "Output format printed to stdout"
           value: "json"
-  - name: rag
-    inference_engine:
-      name: "rag"
-      binary: "doc2rag"
-      options:
-        - name: "--debug"
-          description: "Enable debug logging"
-          if: "{{ args.debug }}"
-        - name: "--format"
-          description: "Output format for RAG data"
-          value: "{{ args.format }}"
-        - name: "--ocr"
-          description: "Enable embedded image text extraction from PDF"
-          if: "{{ args.ocr }}"
-        - name: "/output"
-          description: "Destination directory for RAG data"
-        - name: ""
-          description: "Directory containing input files for processing"
-          value: "{{ args.inputdir }}"
-          if: "{{ args.paths }}"
-        - name: ""
-          description: "URLs to process"
-          value: "{{ args.urls }}"
-  - name: run --rag
-    inference_engine:
-      name: "RAG proxy with chat"
-      binary: "rag_framework"
-      options: &rag_framework_options
-        - name: "--debug"
-          description: "Enable debug logging"
-          if: "{{ args.debug }}"
-        - name: ""
-          description: "Serve argument"
-          value: "serve"
-        - name: "--port"
-          description: "Port for the RAG proxy to listen on"
-          value: "{{ args.port }}"
-        - name: "--model-host"
-          description: "The URL where the LLM is available"
-          value: "{{ args.model_host }}"
-        - name: "--model-port"
-          description: "The port where the LLM is available"
-          value: "{{ args.model_port }}"
-        - name: ""
-          description: "Path to the RAG vector database"
-          value: "/rag/vector.db"
-  - name: serve --rag
-    inference_engine:
-      name: "llama-server with RAG proxy"
-      binary: "rag_framework"
-      options: *rag_framework_options
   - name: convert
     inference_engine:
       name: "convert hf to gguf"

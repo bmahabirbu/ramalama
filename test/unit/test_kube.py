@@ -7,9 +7,8 @@ from ramalama.kube import Kube
 
 
 class Args:
-    def __init__(self, name: str = "", rag: str = "", port: str = "", env: list = None, MODEL: Optional[str] = None):
+    def __init__(self, name: str = "", port: str = "", env: list = None, MODEL: Optional[str] = None):
         self.name = name
-        self.rag = rag
         self.env = env if env is not None else []
         if port:  # Only set port attribute if port is provided
             self.port = port
@@ -90,18 +89,6 @@ DATA_PATH = Path(__file__).parent / "data" / "test_kube"
                 artifact=False,
             ),
             "with_port_mapping.yaml",
-        ),
-        (
-            Input(
-                model_name="tinyllama",
-                model_src_path="/path/to/model.file",
-                model_dest_path="/mnt/models/model.file",
-                model_file_exists=True,
-                args=Args(rag="registry.redhat.io/ubi9/ubi:latest"),
-                exec_args=["llama-server", "--model", "/mnt/models/model.file"],
-                artifact=False,
-            ),
-            "with_rag.yaml",
         ),
         (
             Input(
@@ -218,7 +205,6 @@ def test_kube_no_port(monkeypatch):
     class ArgsNoPort:
         def __init__(self):
             self.image = "testimage"
-            self.rag = ""
 
     args = ArgsNoPort()
 

@@ -1,5 +1,4 @@
-from ramalama.transports import api, huggingface, modelscope, oci, ollama, rlcr, transport_factory, url
-from ramalama.transports.api import APITransport
+from ramalama.transports import huggingface, modelscope, oci, ollama, rlcr, transport_factory, url
 from ramalama.transports.huggingface import Huggingface, HuggingfaceRepository
 from ramalama.transports.modelscope import ModelScope, ModelScopeRepository
 from ramalama.transports.oci import OCI
@@ -8,7 +7,6 @@ from ramalama.transports.rlcr import RamalamaContainerRegistry
 from ramalama.transports.url import URL
 
 __all__ = [
-    "api",
     "huggingface",
     "oci",
     "modelscope",
@@ -25,5 +23,4 @@ __all__ = [
     "OllamaRepository",
     "RamalamaContainerRegistry",
     "URL",
-    "APITransport",
 ]

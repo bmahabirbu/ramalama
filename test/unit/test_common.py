@@ -1,20 +1,16 @@
 import os
 import shutil
 import subprocess
-from contextlib import ExitStack
 from pathlib import Path
 from sys import platform
-from unittest.mock import MagicMock, Mock, mock_open, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from ramalama.cli import configure_subcommands, create_argument_parser, default_image, default_rag_image
+from ramalama.cli import configure_subcommands, create_argument_parser, default_image
 from ramalama.common import (
     accel_image,
-    check_nvidia,
-    find_in_cdi,
     get_accel,
-    load_cdi_config,
     populate_volume_from_image,
     rm_until_substring,
     verify_checksum,
@@ -99,34 +95,23 @@ def test_verify_checksum(
         shutil.rmtree(full_dir_path)
 
 
-DEFAULT_IMAGES = {
-    "HIP_VISIBLE_DEVICES": "quay.io/ramalama/rocm",
-}
-
-
 @pytest.mark.parametrize(
-    "accel_env,env_override,config_override,expected_result",
+    "env_override,config_override,expected_result",
     [
-        (None, None, None, f"{DEFAULT_IMAGE}:latest"),
-        (None, f"{DEFAULT_IMAGE}:latest", None, f"{DEFAULT_IMAGE}:latest"),
-        (None, None, f"{DEFAULT_IMAGE}:latest", f"{DEFAULT_IMAGE}:latest"),
-        (None, f"{DEFAULT_IMAGE}:tag", None, f"{DEFAULT_IMAGE}:tag"),
-        (None, None, f"{DEFAULT_IMAGE}:tag", f"{DEFAULT_IMAGE}:tag"),
-        (None, f"{DEFAULT_IMAGE}@sha256:digest", None, f"{DEFAULT_IMAGE}@sha256:digest"),
-        (None, None, f"{DEFAULT_IMAGE}@sha256:digest", f"{DEFAULT_IMAGE}@sha256:digest"),
-        ("HIP_VISIBLE_DEVICES", None, None, "quay.io/ramalama/rocm:latest"),
-        ("HIP_VISIBLE_DEVICES", f"{DEFAULT_IMAGE}:latest", None, f"{DEFAULT_IMAGE}:latest"),
-        ("HIP_VISIBLE_DEVICES", None, f"{DEFAULT_IMAGE}:latest", f"{DEFAULT_IMAGE}:latest"),
+        (None, None, f"{DEFAULT_IMAGE}:latest"),
+        (f"{DEFAULT_IMAGE}:latest", None, f"{DEFAULT_IMAGE}:latest"),
+        (None, f"{DEFAULT_IMAGE}:latest", f"{DEFAULT_IMAGE}:latest"),
+        (f"{DEFAULT_IMAGE}:tag", None, f"{DEFAULT_IMAGE}:tag"),
+        (None, f"{DEFAULT_IMAGE}:tag", f"{DEFAULT_IMAGE}:tag"),
+        (f"{DEFAULT_IMAGE}@sha256:digest", None, f"{DEFAULT_IMAGE}@sha256:digest"),
+        (None, f"{DEFAULT_IMAGE}@sha256:digest", f"{DEFAULT_IMAGE}@sha256:digest"),
     ],
 )
-def test_accel_image(accel_env: str, env_override, config_override: str, expected_result: str, monkeypatch):
+def test_accel_image(env_override, config_override: str, expected_result: str, monkeypatch):
     monkeypatch.setattr("ramalama.common.get_accel", lambda: "none")
     monkeypatch.setattr("ramalama.common.attempt_to_use_versioned", lambda *args, **kwargs: False)
 
     with NamedTemporaryFile('w', delete_on_close=False) as f:
-        cmdline = []
-        cmdline.extend(["run", "granite"])
-
         env = {}
         if config_override:
             f.write(f"""\
@@ -138,8 +123,6 @@ image = "{config_override}"
         else:
             env["RAMALAMA_CONFIG"] = "/dev/null"
 
-        if accel_env:
-            env[accel_env] = "1"
         if env_override:
             env["RAMALAMA_IMAGE"] = env_override
 
@@ -147,7 +130,6 @@ image = "{config_override}"
             config = default_config()
             with patch("ramalama.cli.get_config", return_value=config):
                 default_image.cache_clear()
-                default_rag_image.cache_clear()
                 parser = create_argument_parser("test_accel_image")
                 configure_subcommands(parser)
                 assert accel_image(config) == expected_result
@@ -170,245 +152,33 @@ def test_apple_vm_returns_result(mock_handle_provider, mock_run_cmd):
     mock_handle_provider.assert_called_once_with({"Name": "myvm"}, config)
 
 
-class TestCheckNvidia:
-    def setup_method(self):
-        check_nvidia.cache_clear()
-
-    @patch("ramalama.common.find_in_cdi")
-    @patch("ramalama.common.run_cmd")
-    def test_check_nvidia_smi_success(self, mock_run_cmd, mock_find_in_cdi):
-        mock_find_in_cdi.return_value = (["all"], [])
-        mock_run_cmd.return_value.stdout = "0,GPU-08b3c2e8-cb7b-ea3f-7711-a042c580b3e8"
-        assert check_nvidia() == "cuda"
-
-    @patch("ramalama.common.run_cmd")
-    def test_check_nvidia_smi_failure(self, mock_run_cmd):
-        mock_run_cmd.side_effect = subprocess.CalledProcessError(1, "nvidia-smi")
-        assert check_nvidia() is None
-
-    @patch("ramalama.common.run_cmd")
-    def test_check_nvidia_smi_not_found(self, mock_run_cmd):
-        mock_run_cmd.side_effect = OSError("nvidia-smi not found")
-        assert check_nvidia() is None
-
-
 class TestGetAccel:
-    accels = [
-        ("check_rocm_amd", "hip"),
-        ("check_nvidia", "cuda"),
-        ("check_mthreads", "musa"),
-        ("check_intel", "intel"),
-        ("check_ascend", "cann"),
-        ("check_asahi", "asahi"),
-    ]
+    """Tests for get_accel() which checks /dev/dxg and /dev/dri for vulkan support."""
 
     def setup_method(self):
         get_accel.cache_clear()
 
-    @pytest.mark.parametrize("accel,expected", accels)
-    def test_get_accel(self, accel, expected):  # sourcery skip: no-loop-in-tests
-        with ExitStack() as stack:
-            for other_accel, _ in self.accels:
-                return_value = expected if other_accel == accel else None
-                stack.enter_context(patch(f"ramalama.common.{other_accel}", return_value=return_value))
-            returned_accel = get_accel()
-            assert returned_accel == expected
+    @patch("ramalama.common.os.path.exists")
+    def test_get_accel_returns_vulkan_when_dxg_exists(self, mock_exists):
+        mock_exists.side_effect = lambda p: p == "/dev/dxg"
+        assert get_accel() == "vulkan"
 
-    def test_default_get_accel(self):  # sourcery skip: no-loop-in-tests
-        with ExitStack() as stack:
-            for other_accel, _ in self.accels:
-                stack.enter_context(patch(f"ramalama.common.{other_accel}", return_value=None))
-            returned_accel = get_accel()
-            assert returned_accel == "none"
+    @patch("ramalama.common.os.path.exists")
+    def test_get_accel_returns_vulkan_when_dri_exists(self, mock_exists):
+        # /dev/dxg checked first, returns False; /dev/dri returns True
+        mock_exists.side_effect = lambda p: p == "/dev/dri"
+        assert get_accel() == "vulkan"
 
+    @patch("ramalama.common.os.path.exists")
+    def test_get_accel_returns_none_when_neither_exists(self, mock_exists):
+        mock_exists.return_value = False
+        assert get_accel() == "none"
 
-CDI_GPU_UUID = "GPU-08b3c2e8-cb7b-ea3f-7711-a042c580b3e8"
-
-# Sample from WSL2
-CDI_YAML_1 = '''
----
-cdiVersion: 0.3.0
-containerEdits:
-  env:
-  - NVIDIA_VISIBLE_DEVICES=void
-  hooks:
-  - args:
-    - nvidia-cdi-hook
-    - create-symlinks
-    - --link
-    - /usr/lib/wsl/drivers/nvlti.inf_amd64_4bd2a3580753f54d/nvidia-smi::/usr/bin/nvidia-smi
-    hookName: createContainer
-    path: /usr/bin/nvidia-cdi-hook
-devices:
-- containerEdits:
-    deviceNodes:
-    - path: /dev/dxg
-  name: all
-kind: nvidia.com/gpu
-'''
-
-CDI_YAML_2 = '''
----
-cdiVersion: 0.5.0
-containerEdits:
-  deviceNodes:
-  - path: /dev/nvidia-modeset
-  - path: /dev/nvidia-uvm
-  - path: /dev/nvidia-uvm-tools
-  - path: /dev/nvidiactl
-  env:
-  - NVIDIA_VISIBLE_DEVICES=void
-  hooks:
-  - args:
-    - nvidia-cdi-hook
-    - create-symlinks
-    - --link
-    - ../libnvidia-allocator.so.1::/usr/lib64/gbm/nvidia-drm_gbm.so
-    env:
-    - NVIDIA_CTK_DEBUG=false
-    hookName: createContainer
-    path: /usr/bin/nvidia-cdi-hook
-devices:
-- containerEdits:
-    deviceNodes:
-    - path: /dev/nvidia0
-    - path: /dev/dri/card1
-    - path: /dev/dri/renderD128
-    hooks:
-    - args:
-      - nvidia-cdi-hook
-      - create-symlinks
-      - --link
-      - ../card1::/dev/dri/by-path/pci-0000:52:00.0-card
-      - --link
-      - ../renderD128::/dev/dri/by-path/pci-0000:52:00.0-render
-      env:
-      - NVIDIA_CTK_DEBUG=false
-      hookName: createContainer
-      path: /usr/bin/nvidia-cdi-hook
-  name: "0"
-- containerEdits:
-    deviceNodes:
-    - path: /dev/nvidia0
-    - path: /dev/dri/card1
-    - path: /dev/dri/renderD128
-    hooks:
-    - args:
-      - nvidia-cdi-hook
-      - create-symlinks
-      - --link
-      - ../card1::/dev/dri/by-path/pci-0000:52:00.0-card
-      - --link
-      - ../renderD128::/dev/dri/by-path/pci-0000:52:00.0-render
-      env:
-      - NVIDIA_CTK_DEBUG=false
-      hookName: createContainer
-      path: /usr/bin/nvidia-cdi-hook
-  name: GPU-08b3c2e8-cb7b-ea3f-7711-a042c580b3e8
-- containerEdits:
-    deviceNodes:
-    - path: /dev/nvidia0
-    - path: /dev/dri/card1
-    - path: /dev/dri/renderD128
-    hooks:
-    - args:
-      - nvidia-cdi-hook
-      - create-symlinks
-      - --link
-      - ../card1::/dev/dri/by-path/pci-0000:52:00.0-card
-      - --link
-      - ../renderD128::/dev/dri/by-path/pci-0000:52:00.0-render
-      env:
-      - NVIDIA_CTK_DEBUG=false
-      hookName: createContainer
-      path: /usr/bin/nvidia-cdi-hook
-  name: all
-kind: nvidia.com/gpu
-'''
-
-CDI_JSON_1 = '''
-{"cdiVersion":"0.3.0","kind":"nvidia.com/gpu","devices":[{"name":"all","containerEdits":{"deviceNodes":[{"path":"/dev/dxg"}]}}],"containerEdits":{"env":["NVIDIA_VISIBLE_DEVICES=void"]}}
-'''
-CDI_JSON_2 = '''
-{"cdiVersion":"0.5.0","kind":"nvidia.com/gpu","devices":[{"name":"0","containerEdits":{"deviceNodes":[{"path":"/dev/nvidia0"},{"path":"/dev/dri/card1"},{"path":"/dev/dri/renderD128"}],"hooks":[{"hookName":"createContainer","path":"/usr/bin/nvidia-cdi-hook","args":["nvidia-cdi-hook","create-symlinks","--link","../card1::/dev/dri/by-path/pci-0000:52:00.0-card","--link","../renderD128::/dev/dri/by-path/pci-0000:52:00.0-render"]},{"hookName":"createContainer","path":"/usr/bin/nvidia-cdi-hook","args":["nvidia-cdi-hook","chmod","--mode","755","--path","/dev/dri"]}]}},{"name":"GPU-08b3c2e8-cb7b-ea3f-7711-a042c580b3e8","containerEdits":{"deviceNodes":[{"path":"/dev/nvidia0"},{"path":"/dev/dri/card1"},{"path":"/dev/dri/renderD128"}],"hooks":[{"hookName":"createContainer","path":"/usr/bin/nvidia-cdi-hook","args":["nvidia-cdi-hook","create-symlinks","--link","../card1::/dev/dri/by-path/pci-0000:52:00.0-card","--link","../renderD128::/dev/dri/by-path/pci-0000:52:00.0-render"]},{"hookName":"createContainer","path":"/usr/bin/nvidia-cdi-hook","args":["nvidia-cdi-hook","chmod","--mode","755","--path","/dev/dri"]}]}},{"name":"all","containerEdits":{"deviceNodes":[{"path":"/dev/nvidia0"},{"path":"/dev/dri/card1"},{"path":"/dev/dri/renderD128"}],"hooks":[{"hookName":"createContainer","path":"/usr/bin/nvidia-cdi-hook","args":["nvidia-cdi-hook","create-symlinks","--link","../card1::/dev/dri/by-path/pci-0000:52:00.0-card","--link","../renderD128::/dev/dri/by-path/pci-0000:52:00.0-render"]},{"hookName":"createContainer","path":"/usr/bin/nvidia-cdi-hook","args":["nvidia-cdi-hook","chmod","--mode","755","--path","/dev/dri"]}]}}],"containerEdits":{"env":["NVIDIA_VISIBLE_DEVICES=void"]}}'''  # noqa: E501
-
-
-@pytest.mark.parametrize(
-    "filename,source,expected",
-    [
-        pytest.param(
-            "nvidia.yaml",
-            CDI_YAML_1,
-            [
-                "all",
-            ],
-            id="YAML-all",
-        ),
-        pytest.param("nvidia.yaml", CDI_YAML_2, ["0", "all", CDI_GPU_UUID], id="YAML-0-UUID-all"),
-        pytest.param(
-            "nvidia.json",
-            CDI_JSON_1,
-            [
-                "all",
-            ],
-            id="JSON-all",
-        ),
-        pytest.param(
-            "nvidia.json",
-            CDI_JSON_2,
-            [
-                "0",
-                CDI_GPU_UUID,
-                "all",
-            ],
-            id="JSON-0-UUID-all",
-        ),
-    ],
-)
-def test_load_cdi_config(filename, source, expected):
-    with patch("os.walk", return_value=(("/etc/cdi", None, (filename,)),)):
-        with patch("builtins.open", mock_open(read_data=source)):
-            cdi = load_cdi_config(["/var/run/cdi", "/etc/cdi"])
-            assert cdi
-            assert "devices" in cdi
-            devices = cdi["devices"]
-            names = [device["name"] for device in devices]
-            assert set(expected) == set(names)
-
-
-@pytest.mark.parametrize(
-    "visible,conf,unconf",
-    [
-        (["all"], ["all"], []),
-        (["0", "all"], ["0", "all"], []),
-        ([CDI_GPU_UUID, "all"], [CDI_GPU_UUID, "all"], []),
-        (["1", "all"], ["all"], ["1"]),
-        (["dummy", "all"], ["all"], ["dummy"]),
-    ],
-)
-@patch("builtins.open", mock_open(read_data=CDI_YAML_2))
-@patch("os.walk", return_value=(("/etc/cdi", None, ("nvidia.yaml",)),))
-def test_find_in_cdi(mock_walk, visible, conf, unconf):
-    assert find_in_cdi(visible) == (conf, unconf)
-
-
-@pytest.mark.parametrize(
-    "visible,conf,unconf",
-    [
-        (["all"], [], ["all"]),
-        (["0", "all"], [], ["0", "all"]),
-        ([CDI_GPU_UUID, "all"], [], [CDI_GPU_UUID, "all"]),
-    ],
-)
-@patch("builtins.open", mock_open(read_data="asdf\n- ghjk\n"))
-@patch("os.walk", return_value=(("/etc/cdi", None, ("nvidia.yaml",)),))
-def test_find_in_cdi_broken(mock_walk, visible, conf, unconf):
-    assert find_in_cdi(visible) == (conf, unconf)
-
-
-@patch("ramalama.common.load_cdi_config", return_value=None)
-def test_find_in_cdi_no_config(mock_load_cdi_config):
-    assert find_in_cdi(["all"]) == ([], ["all"])
+    @patch("ramalama.common.os.path.exists")
+    def test_get_accel_prefers_dxg_over_dri(self, mock_exists):
+        # When both exist, /dev/dxg is checked first and returns vulkan
+        mock_exists.side_effect = lambda p: p in ("/dev/dxg", "/dev/dri")
+        assert get_accel() == "vulkan"
 
 
 class TestPopulateVolumeFromImage:

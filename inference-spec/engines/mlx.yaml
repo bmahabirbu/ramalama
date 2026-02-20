@@ -29,8 +29,3 @@ commands:
         - name: ""
           description: "Arbitrary runtime arguments for mlx server"
           value: "{{ args.runtime_args }}"
-  - name: run
-    inference_engine:
-      name: "mlx serve with chat"
-      binary: "mlx_lm.server"
-      options: *serve_run_options

@@ -1,5 +1,4 @@
 import argparse
-import copy
 import errno
 import json
 import os
@@ -10,9 +9,7 @@ import urllib.error
 from dataclasses import asdict
 from datetime import datetime, timezone
 from functools import lru_cache
-from textwrap import dedent
 from typing import Any, get_args
-from urllib.parse import urlparse
 
 from ramalama.benchmarks.manager import BenchmarksManager
 
@@ -40,18 +37,12 @@ from ramalama.config import (
     get_inference_spec_files,
     load_file_config,
 )
-from ramalama.config_types import COLOR_OPTIONS
 from ramalama.endian import EndianMismatchError
 from ramalama.log_levels import LogLevel
 from ramalama.logger import configure_logger, logger
 from ramalama.model_inspect.error import ParseError
 from ramalama.model_store.global_store import GlobalModelStore
-from ramalama.path_utils import file_uri_to_path
-from ramalama.prompt_utils import default_prefix
-from ramalama.rag import RagTransport, rag_image
 from ramalama.shortnames import Shortnames
-from ramalama.stack import Stack
-from ramalama.transports.api import APITransport
 from ramalama.transports.base import (
     MODEL_TYPES,
     NoGGUFModelFileFound,
@@ -71,11 +62,6 @@ LIST_SORT_ORDER_OPTIONS = ["desc", "asc"]
 @lru_cache(maxsize=1)
 def default_image() -> str:
     return accel_image(get_config())
-
-
-@lru_cache(maxsize=1)
-def default_rag_image() -> str:
-    return rag_image(get_config())
 
 
 @lru_cache(maxsize=1)
@@ -325,7 +311,6 @@ def configure_subcommands(parser):
     subparsers.required = False
     bench_parser(subparsers)
     benchmarks_parser(subparsers)
-    chat_parser(subparsers)
     containers_parser(subparsers)
     convert_parser(subparsers)
     help_parser(subparsers)
@@ -334,16 +319,12 @@ def configure_subcommands(parser):
     list_parser(subparsers)
     login_parser(subparsers)
     logout_parser(subparsers)
-    perplexity_parser(subparsers)
     pull_parser(subparsers)
     push_parser(subparsers)
-    rag_parser(subparsers)
     rm_parser(subparsers)
-    run_parser(subparsers)
     serve_parser(subparsers)
     stop_parser(subparsers)
     version_parser(subparsers)
-    daemon_parser(subparsers)
 
 
 def post_parse_setup(args):
@@ -709,7 +690,6 @@ def info_cli(args: DefaultArgsType) -> None:
             "Engines": {spec: str(path) for spec, path in get_inference_spec_files().items()},
             "Schema": {schema: str(path) for schema, path in get_inference_schema_files().items()},
         },
-        "RagImage": default_rag_image(),
         "Selinux": get_config().selinux,
         "Shortnames": {
             "Files": shortnames.paths,
@@ -820,13 +800,6 @@ def convert_parser(subparsers):
         help=f"GGUF quantization format. If specified without value, {config.gguf_quantization_mode} is used.",
     )
     add_network_argument(parser)
-    parser.add_argument(
-        "--rag-image",
-        default=default_rag_image(),
-        help="Image to use for conversion to GGUF",
-        action=OverrideDefaultAction,
-        completer=local_images,
-    )
     parser.add_argument(
         "--image",
         default=default_image(),
@@ -953,15 +926,8 @@ def push_cli(args):
 
 def runtime_options(parser, command):
     config = get_config()
-    if command in ["run", "serve"]:
-        parser.add_argument(
-            "--api",
-            default=config.api,
-            choices=["llama-stack", "none"],
-            help="unified API layer for for Inference, RAG, Agents, Tools, Safety, Evals, and Telemetry.",
-        )
     parser.add_argument("--authfile", help="path of the authentication file")
-    if command in ["run", "perplexity", "serve"]:
+    if command in ["serve", "bench"]:
         parser.add_argument(
             "--cache-reuse",
             dest="cache_reuse",
@@ -1043,10 +1009,6 @@ def runtime_options(parser, command):
         help="""pass `--group-add keep-groups` to podman.
 If GPU device on host is accessible to via group access, this option leaks the user groups into the container.""",
     )
-    if command == "run":
-        parser.add_argument(
-            "--keepalive", type=str, help="duration to keep a model loaded (e.g. 5m)", completer=suppressCompleter
-        )
     if command == "serve":
         parser.add_argument("--model-draft", help="Draft model", completer=local_models)
     parser.add_argument(
@@ -1056,7 +1018,7 @@ If GPU device on host is accessible to via group access, this option leaks the u
         help="name of container in which the Model will be run",
         completer=suppressCompleter,
     )
-    if command in ["run", "perplexity", "serve"]:
+    if command in ["serve", "bench"]:
         parser.add_argument(
             "--max-tokens",
             dest="max_tokens",
@@ -1085,7 +1047,7 @@ If GPU device on host is accessible to via group access, this option leaks the u
         help="override the default OCI runtime used to launch the container",
         completer=suppressCompleter,
     )
-    if command in ["run", "serve"]:
+    if command == "serve":
         parser.add_argument(
             "-p",
             "--port",
@@ -1106,18 +1068,7 @@ If GPU device on host is accessible to via group access, this option leaks the u
         choices=["always", "missing", "never", "newer"],
         help='pull image policy',
     )
-    if command in ["run", "serve"]:
-        parser.add_argument(
-            "--rag", help="RAG vector database or OCI Image to be served with the model", completer=local_models
-        )
-        parser.add_argument(
-            "--rag-image",
-            default=default_rag_image(),
-            help="OCI container image to run with the specified RAG data",
-            action=OverrideDefaultAction,
-            completer=local_images,
-        )
-    if command in ["perplexity", "run", "serve"]:
+    if command in ["serve", "bench"]:
         parser.add_argument(
             "--runtime-args",
             dest="runtime_args",
@@ -1168,7 +1119,7 @@ If GPU device on host is accessible to via group access, this option leaks the u
             dest="dri",
             choices=["on", "off"],
             default="on",
-            help="mount /dev/dri into the container when running llama-stack (default: on)",
+            help="mount /dev/dri into the container for GPU access (default: on)",
         )
 
 
@@ -1184,138 +1135,6 @@ def default_threads():
     return config.threads
 
 
-def chat_run_options(parser):
-    parser.add_argument(
-        '--color',
-        '--colour',
-        default="auto",
-        choices=get_args(COLOR_OPTIONS),
-        help='possible values are "never", "always" and "auto".',
-    )
-    parser.add_argument("--prefix", type=str, help="prefix for the user prompt", default=default_prefix())
-    parser.add_argument("--mcp", nargs="*", help="MCP servers to use for the chat")
-    parser.add_argument(
-        "--summarize-after",
-        type=int,
-        default=get_config().summarize_after,
-        metavar="N",
-        help="automatically summarize conversation history after N messages to prevent context growth (0=disabled)",
-    )
-
-
-def _chat_cli(args):
-    from ramalama import chat as chat_module
-
-    return chat_module.chat(args)
-
-
-def chat_parser(subparsers):
-    parser = subparsers.add_parser("chat", help="OpenAI chat with the specified RESTAPI URL")
-    parser.add_argument(
-        "--api-key",
-        type=str,
-        default=get_config().api_key,
-        help="""OpenAI-compatible API key.
-        Can also be set in ramalama.conf or via the RAMALAMA_API_KEY environment variable.""",
-    )
-    chat_run_options(parser)
-    parser.add_argument(
-        "--list",
-        "--ls",
-        action="store_true",
-        help="list the available models at an endpoint",
-    )
-    parser.add_argument("--url", type=str, default="http://127.0.0.1:8080/v1", help="the url to send requests to")
-    parser.add_argument("--model", "-m", type=str, completer=local_models, help="model for inferencing")
-    parser.add_argument("--rag", type=str, help="a file or directory to use as context for the chat")
-    parser.add_argument(
-        "--max-tokens",
-        dest="max_tokens",
-        type=int,
-        default=get_config().max_tokens,
-        help="maximum number of tokens to generate (0 = unlimited)",
-    )
-    parser.add_argument(
-        "--temp",
-        type=float,
-        default=float(get_config().temp),
-        help="temperature of the response from the AI model",
-    )
-    parser.add_argument(
-        "ARGS", nargs="*", help="overrides the default prompt, and the output is returned without entering the chatbot"
-    )
-    parser.set_defaults(func=_chat_cli)
-
-
-def _rag_args(args):
-    args.noout = not args.debug
-    rag_args = copy.copy(args)
-    rag_args.subcommand = f"{args.subcommand} --rag"
-    rag_args.MODEL = args.rag
-    rag_args.image = args.rag_image
-    if args.engine == "podman":
-        rag_args.model_host = "host.containers.internal"
-    else:
-        rag_args.model_host = f"host.{args.engine}.internal"
-    # If --name was specified, use it for the RAG proxy
-    args.name = None
-    # If --port was specified, use it for the RAG proxy, and
-    # select a random port for the model
-    args.port = None
-    rag_args.model_port = args.port = compute_serving_port(args, exclude=[rag_args.port])
-    rag_args.model_args = args
-    rag_args.generate = ""
-    return rag_args
-
-
-def run_parser(subparsers):
-    parser = subparsers.add_parser("run", help="run specified AI Model as a chatbot")
-    runtime_options(parser, "run")
-    chat_run_options(parser)
-    parser.add_argument("MODEL", completer=local_models)  # positional argument
-
-    parser.add_argument(
-        "ARGS",
-        nargs="*",
-        help="overrides the default prompt, and the output is returned without entering the chatbot",
-        completer=suppressCompleter,
-    )
-    parser._actions.sort(key=lambda x: x.option_strings)
-    parser.set_defaults(func=run_cli)
-
-
-def run_cli(args):
-
-    try:
-        # detect available port and update arguments
-        args.port = compute_serving_port(args)
-        model = New(args.MODEL, args)
-        model.ensure_model_exists(args)
-    except KeyError as e:
-        logger.debug(e)
-        try:
-            args.quiet = True
-            model = TransportFactory(args.MODEL, args, ignore_stderr=True).create_oci()
-            model.ensure_model_exists(args)
-        except Exception as exc:
-            raise e from exc
-
-    is_api_transport = isinstance(model, APITransport)
-
-    if args.rag and is_api_transport:
-        raise ValueError("ramalama run --rag is not supported for hosted API transports.")
-
-    if args.rag:
-        if not args.container:
-            raise ValueError("ramalama run --rag cannot be run with the --nocontainer option.")
-        args = _rag_args(args)
-
-        model = RagTransport(model, assemble_command_lazy(args.model_args), args)
-        model.ensure_model_exists(args)
-
-    model.run(args, assemble_command_lazy(args))
-
-
 def serve_parser(subparsers):
     parser = subparsers.add_parser("serve", help="serve REST API on specified AI Model")
     runtime_options(parser, "serve")
@@ -1328,15 +1147,7 @@ def serve_cli(args):
     if not args.container:
         args.detach = False
 
-    if args.api == "llama-stack":
-        if not args.container:
-            raise ValueError("ramalama serve --api llama-stack command cannot be run with the --nocontainer option.")
-
-        stack = Stack(args)
-        return stack.serve()
-
     try:
-        # detect available port and update arguments
         args.port = compute_serving_port(args)
 
         model = New(args.MODEL, args)
@@ -1348,22 +1159,10 @@ def serve_cli(args):
             args.quiet = True
             model = TransportFactory(args.MODEL, args, ignore_stderr=True).create_oci()
             model.ensure_model_exists(args)
-            # Since this is a OCI model, prepend oci://
             args.MODEL = f"oci://{args.MODEL}"
 
         except Exception:
             raise e
-
-    if isinstance(model, APITransport):
-        raise ValueError("ramalama serve is not supported for hosted API transports.")
-
-    if args.rag:
-        if not args.container:
-            raise ValueError("ramalama serve --rag cannot be run with the --nocontainer option.")
-        args = _rag_args(args)
-
-        model = RagTransport(model, assemble_command_lazy(args.model_args), args)
-        model.ensure_model_exists(args)
 
     model.serve(args, assemble_command_lazy(args))
 
@@ -1393,203 +1192,9 @@ def stop_container(args):
         engine.stop_container(args, i)
 
 
-def daemon_parser(subparsers) -> None:
-    config = get_config()
-    parser: ArgumentParserWithDefaults = subparsers.add_parser("daemon", help="daemon operations")
-    parser.set_defaults(func=lambda _: parser.print_help())
-
-    daemon_parsers = parser.add_subparsers(dest="daemon_command")
-
-    start_parser = daemon_parsers.add_parser("start")
-    start_parser.add_argument(
-        "--image",
-        default=default_image(),
-        help="OCI container image to run with the specified AI model",
-        action=OverrideDefaultAction,
-        completer=local_images,
-    )
-    start_parser.add_argument(
-        "--pull",
-        dest="pull",
-        type=str,
-        default=config.pull,
-        choices=["always", "missing", "never", "newer"],
-        help='pull image policy',
-    )
-    start_parser.add_argument(
-        "--host",
-        default=config.host,
-        help="IP address to listen",
-        completer=suppressCompleter,
-    )
-    start_parser.add_argument(
-        "-p",
-        "--port",
-        type=parse_port_option,
-        default=config.port,
-        help="port for AI Model server to listen on",
-        completer=suppressCompleter,
-    )
-    start_parser.set_defaults(func=daemon_start_cli)
-
-    run_parser = daemon_parsers.add_parser("run")
-    run_parser.add_argument(
-        "--host",
-        default=config.host,
-        help="IP address to listen",
-        completer=suppressCompleter,
-    )
-    run_parser.add_argument(
-        "-p",
-        "--port",
-        type=parse_port_option,
-        default=config.port,
-        help="port for AI Model server to listen on",
-        completer=suppressCompleter,
-    )
-    run_parser.set_defaults(func=daemon_run_cli)
-
-
-def daemon_start_cli(args):
-    daemon_cmd = []
-    daemon_model_store_dir = args.store
-    is_daemon_in_container = args.container and args.engine in get_args(SUPPORTED_ENGINES)
-
-    if is_daemon_in_container:
-        # If run inside a container, map the model store to the container internal directory
-        daemon_model_store_dir = "/ramalama/models"
-
-        daemon_cmd += [
-            args.engine,
-            "run",
-            "--pull",
-            args.pull,
-            "-d",
-            "-p",
-            f"{args.port}:8080",
-            "-v",
-            f"{args.store}:{daemon_model_store_dir}",
-            args.image,
-        ]
-
-    daemon_cmd += [
-        "ramalama",
-        "--store",
-        daemon_model_store_dir,
-        "daemon",
-        "run",
-        "--port",
-        "8080" if is_daemon_in_container else args.port,
-        "--host",
-        get_config().host if is_daemon_in_container else args.host,
-    ]
-    exec_cmd(daemon_cmd)
-
-
-def daemon_run_cli(args):
-    from ramalama.daemon.daemon import run
-
-    run(host=args.host, port=int(args.port), model_store_path=args.store)
-
-
 def version_parser(subparsers):
     parser = subparsers.add_parser("version", help="display version of RamaLama")
     parser.set_defaults(func=print_version)
-
-
-class AddPathOrUrl(argparse.Action):
-    def __call__(self, parser, namespace, values, option_string=None):
-        if not isinstance(values, list):
-            raise ValueError("AddPathOrUrl can only be used with the settings `nargs='+'`")
-
-        setattr(namespace, self.dest, [])
-        namespace.urls = []
-        for value in values:
-            parsed = urlparse(value)
-            if parsed.scheme in ["http", "https"]:
-                namespace.urls.append(value)
-            else:
-                getattr(namespace, self.dest).append(file_uri_to_path(value))
-
-
-def rag_parser(subparsers):
-    config = get_config()
-    parser = subparsers.add_parser(
-        "rag",
-        help="generate and convert retrieval augmented generation (RAG) data from provided documents into an OCI Image",
-    )
-    parser.add_argument(
-        "--env",
-        dest="env",
-        action='append',
-        type=str,
-        default=config.env,
-        help="environment variables to add to the running RAG container",
-        completer=local_env,
-    )
-    parser.add_argument(
-        "--format",
-        default=config.rag_format,
-        help="Output format for RAG Data",
-        choices=["qdrant", "json", "markdown", "milvus"],
-    )
-    parser.add_argument(
-        "--image",
-        default=default_rag_image(),
-        help="Image to use for generating RAG data",
-        action=OverrideDefaultAction,
-        completer=local_images,
-    )
-    parser.add_argument(
-        "--keep-groups",
-        dest="podman_keep_groups",
-        default=config.keep_groups,
-        action="store_true",
-        help="""pass `--group-add keep-groups` to podman.
-If GPU device on host is accessible to via group access, this option leaks the user groups into the container.""",
-    )
-    add_network_argument(parser, dflt=None)
-    parser.add_argument(
-        "--pull",
-        dest="pull",
-        type=str,
-        default=config.pull,
-        choices=["always", "missing", "never", "newer"],
-        help='pull image policy',
-    )
-    parser.add_argument(
-        "--selinux",
-        default=config.selinux,
-        action=CoerceToBool,
-        help="Enable SELinux container separation",
-    )
-    parser.add_argument(
-        "PATHS",
-        nargs="+",
-        help=dedent("""
-        Files/URLs/Directory containing PDF, DOCX, PPTX, XLSX, HTML, AsciiDoc & Markdown
-        formatted files to be processed"""),
-        action=AddPathOrUrl,
-    )
-    parser.add_argument(
-        "DESTINATION", help="Path or OCI Image name to contain processed rag data", completer=suppressCompleter
-    )
-    parser.add_argument(
-        "--ocr",
-        dest="ocr",
-        default=config.ocr,
-        action="store_true",
-        help="Enable embedded image text extraction from PDF (Increases RAM Usage significantly)",
-    )
-    parser.set_defaults(func=rag_cli)
-
-
-def rag_cli(args):
-    from ramalama import rag as rag_module
-
-    rag = rag_module.Rag(args.DESTINATION)
-    args.inputdir = rag_module.INPUT_DIR
-    rag.generate(args, assemble_command_lazy(args))
 
 
 def rm_parser(subparsers):
@@ -1663,20 +1268,6 @@ def rm_cli(args):
             perror(f"Failed to remove model '{model}': {error}")
         failed_names = ', '.join([model for model, _ in failed_models])
         raise Exception(f"Failed to remove the following models: {failed_names}")
-
-
-def perplexity_parser(subparsers):
-    parser = subparsers.add_parser("perplexity", help="calculate perplexity for specified AI Model")
-    runtime_options(parser, "perplexity")
-    parser.add_argument("MODEL", completer=local_models)  # positional argument
-    parser.set_defaults(func=perplexity_cli)
-
-
-def perplexity_cli(args):
-
-    model = New(args.MODEL, args)
-    model.ensure_model_exists(args)
-    model.perplexity(args, assemble_command_lazy(args))
 
 
 def inspect_parser(subparsers):
@@ -1755,7 +1346,7 @@ def main() -> None:
         message = (
             "Safetensor models are not supported. Please convert it to GGUF via:\n"
             f"$ ramalama convert --gguf=<quantization> {args.model} <oci-name>\n"  # type: ignore[possibly-unbound]
-            "$ ramalama run <oci-name>\n"
+            "$ ramalama serve <oci-name>\n"
         )
         eprint(message, errno.ENOTSUP)
     except NoGGUFModelFileFound:

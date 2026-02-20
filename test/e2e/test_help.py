@@ -85,7 +85,7 @@ def test_help_output(subcommand):
 
 
 @pytest.mark.e2e
-@pytest.mark.parametrize("command", ["run", "bench", "serve"], ids=lambda x: f"ramalama {x}")
+@pytest.mark.parametrize("command", ["bench", "serve"], ids=lambda x: f"ramalama {x}")
 def test_default_image(monkeypatch, command):
     monkeypatch.delenv("RAMALAMA_DEFAULT_IMAGE", raising=False)
     monkeypatch.delenv("RAMALAMA_IMAGES", raising=False)
@@ -102,7 +102,7 @@ def test_default_image(monkeypatch, command):
 
 
 @pytest.mark.e2e
-@pytest.mark.parametrize("command", ["run", "bench", "serve"], ids=lambda x: f"ramalama {x}")
+@pytest.mark.parametrize("command", ["bench", "serve"], ids=lambda x: f"ramalama {x}")
 def test_default_image_by_env_variable(command):
     result = check_output(
         ["ramalama", command, "--help"], env={"RAMALAMA_IMAGE": "quay.io/ramalama-dev/ramalama:latest"}
@@ -115,7 +115,7 @@ def test_default_image_by_env_variable(command):
 
 
 @pytest.mark.e2e
-@pytest.mark.parametrize("command", ["run", "bench", "serve"], ids=lambda x: f"ramalama {x}")
+@pytest.mark.parametrize("command", ["bench", "serve"], ids=lambda x: f"ramalama {x}")
 def test_default_image_by_config(command):
     config = """
     [ramalama]
@@ -132,7 +132,7 @@ def test_default_image_by_config(command):
 
 
 @pytest.mark.e2e
-@pytest.mark.parametrize("command", ["run", "bench", "serve"], ids=lambda x: f"ramalama {x}")
+@pytest.mark.parametrize("command", ["bench", "serve"], ids=lambda x: f"ramalama {x}")
 def test_default_image_by_env_variable_and_config(command):
     config = """
     [ramalama]
@@ -364,31 +364,3 @@ def test_help_rm_message_without_arguments():
     )
 
 
-@pytest.mark.e2e
-def test_default_api_key():
-    import random
-    import string
-
-    # Generate a random API key similar to bats safename function
-    api_key = f"e_t1-{''.join(random.choices(string.ascii_lowercase + string.digits, k=8))}"
-
-    # Test 1: With RAMALAMA_API_KEY environment variable, it should show as default
-    result = check_output(
-        ["ramalama", "chat", "--help"],
-        env={"RAMALAMA_API_KEY": api_key, "RAMALAMA_CONFIG": "NUL" if platform.system() == "Windows" else '/dev/null'},
-    )
-    match = f"default: {api_key}" in result
-    assert match, f"API key from environment should show as (default: {api_key})"
-
-    # Test 2: Environment variable takes precedence over config file
-    config_api_key = f"config_key_{''.join(random.choices(string.ascii_lowercase + string.digits, k=8))}"
-    config = f"""
-    [ramalama]
-    api_key = "{config_api_key}"
-    """
-
-    with RamalamaExecWorkspace(config=config, env_vars={"RAMALAMA_API_KEY": api_key}) as ctx:
-        result = ctx.check_output(["ramalama", "chat", "--help"])
-        match = f"default: {api_key}" in result
-        assert match, f"Environment variable should override config file: expected \
-        {api_key}"

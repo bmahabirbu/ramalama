@@ -16,16 +16,12 @@ def get_config_fields():
     excluded_fields = {
         'settings',  # Internal RamalamaSettings, not user-configurable
         'default_image',  # Internal constant, users configure 'image' instead
-        'default_rag_image',  # Internal constant, users configure 'rag_image' instead
-        'rag_image',  # Derived from rag_images, not directly configured
-        'stack_image',  # Internal constant for stack operations
         'dryrun',  # Runtime flag, not a persistent config option
-        'ocr',  # Runtime flag, not a persistent config option
         'verify',  # Runtime flag for model verification, not typically configured
     }
 
     config_fields = [field.name for field in fields(BaseConfig) if field.name not in excluded_fields]
-    config_fields.extend(('benchmarks', 'http_client', 'images', 'rag_images', 'user'))
+    config_fields.extend(('benchmarks', 'http_client', 'images', 'user'))
     return sorted(set(config_fields))
 
 
@@ -187,7 +183,6 @@ class TestConfigDocumentation:
     # Aliases and special cases that are documented but map to actual fields
     KNOWN_ALIASES = {
         'default_image',  # Alias for 'image' configuration
-        'default_rag_image',  # Alias for rag image configuration
         'no_missing_gpu_prompt',  # Nested field under user.no_missing_gpu_prompt
     }
 

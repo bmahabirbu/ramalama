@@ -1,7 +1,7 @@
 from dataclasses import make_dataclass
-from typing import List, Protocol, get_type_hints
+from typing import Protocol, get_type_hints
 
-from ramalama.config_types import COLOR_OPTIONS, SUPPORTED_ENGINES, SUPPORTED_RUNTIMES, PathStr
+from ramalama.config_types import SUPPORTED_ENGINES, SUPPORTED_RUNTIMES, PathStr
 
 
 def protocol_to_dataclass(proto_cls):
@@ -73,36 +73,14 @@ class DefaultArgsType(Protocol):
 DefaultArgs = protocol_to_dataclass(DefaultArgsType)
 
 
-class ChatSubArgsType(Protocol):
-    prefix: str
-    url: str
-    color: COLOR_OPTIONS
-    list: bool
-    model: str | None
-    rag: str | None
-    api_key: str | None
-    ARGS: List[str] | None
-    max_tokens: int | None
-    temp: float | None
-
-
-ChatSubArgs = protocol_to_dataclass(ChatSubArgsType)
-
-
-class ChatArgsType(DefaultArgsType, ChatSubArgsType):
-    ignore: bool | None  # runtime-only
-
-
-class ServeRunArgsType(DefaultArgsType, Protocol):
-    """Args for serve and run commands"""
+class ServeArgsType(DefaultArgsType, Protocol):
+    """Args for serve command"""
 
     MODEL: str
     port: int | None
     name: str | None
-    rag: str | None
     subcommand: str
     detach: bool | None
-    api: str | None
     image: str
     host: str | None
     generate: str | None
@@ -111,26 +89,6 @@ class ServeRunArgsType(DefaultArgsType, Protocol):
     authfile: str | None
     device: list[str] | None
     env: list[str]
-    ARGS: list[str] | None  # For run command
-    mcp: list[str] | None
-    summarize_after: int
-    # Chat/run specific options
-    color: COLOR_OPTIONS
-    prefix: str
-    rag_image: str | None
-    ignore: bool | None  # runtime-only
 
 
-ServeRunArgs = protocol_to_dataclass(ServeRunArgsType)
-
-
-class RagArgsType(ServeRunArgsType, Protocol):
-    """Args when using RAG functionality - wraps model args"""
-
-    model_args: ServeRunArgsType
-    model_host: str
-    model_port: int
-    rag: str  # type: ignore
-
-
-RagArgs = protocol_to_dataclass(RagArgsType)
+ServeArgs = protocol_to_dataclass(ServeArgsType)

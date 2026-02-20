@@ -4,11 +4,9 @@ from typing import TypeAlias
 from urllib.parse import urlparse
 
 from ramalama.arg_types import StoreArgType
-from ramalama.chat_providers.api_providers import get_chat_provider
 from ramalama.common import rm_until_substring
 from ramalama.config import get_config
 from ramalama.path_utils import file_uri_to_path
-from ramalama.transports.api import APITransport
 from ramalama.transports.base import MODEL_TYPES, Transport
 from ramalama.transports.huggingface import Huggingface
 from ramalama.transports.modelscope import ModelScope
@@ -17,7 +15,7 @@ from ramalama.transports.ollama import Ollama
 from ramalama.transports.rlcr import RamalamaContainerRegistry
 from ramalama.transports.url import URL
 
-CLASS_MODEL_TYPES: TypeAlias = Huggingface | Ollama | OCI | URL | ModelScope | RamalamaContainerRegistry | APITransport
+CLASS_MODEL_TYPES: TypeAlias = Huggingface | Ollama | OCI | URL | ModelScope | RamalamaContainerRegistry
 
 
 class TransportFactory:
@@ -67,9 +65,6 @@ class TransportFactory:
                 return RamalamaContainerRegistry, self.create_rlcr
             case model if model.startswith(("http://", "https://", "file:")):
                 return URL, self.create_url
-            case model if model.startswith(("openai://")):
-                return APITransport, self.create_api_transport
-
         match self.transport:
             case "huggingface":
                 return Huggingface, self.create_huggingface
@@ -161,11 +156,6 @@ class TransportFactory:
         model = URL(self.pruned_model, self.store_path, urlparse(self.model).scheme)
         model.draft_model = self.draft_model
         return model
-
-    def create_api_transport(self) -> APITransport:
-        scheme = self.model.split("://", 1)[0]
-        return APITransport(self.pruned_model, provider=get_chat_provider(scheme))
-
 
 def New(name, args, transport: str | None = None) -> CLASS_MODEL_TYPES:
     if transport is None:

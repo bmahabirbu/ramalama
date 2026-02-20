@@ -25,34 +25,6 @@ commands:
         - name: ""
           description: "Arbitrary runtime arguments for vLLM server"
           value: "{{ args.runtime_args }}"
-  - name: run
-    inference_engine:
-      name: "vllm server with chat"
-      binary: "{{ '' if host.is_container else 'python3 -m vllm.entrypoints.openai.api_server' }}"
-      options: *serve_run_options
-  - name: rag
-    inference_engine:
-      name: "rag"
-      binary: "doc2rag"
-      options:
-        - name: "--debug"
-          description: "Enable debug logging"
-          if: "{{ args.debug }}"
-        - name: "--format"
-          description: "Output format for RAG data"
-          value: "{{ args.format }}"
-        - name: "--ocr"
-          description: "Enable embedded image text extraction from PDF"
-          if: "{{ args.ocr }}"
-        - name: "/output"
-          description: "Destination directory for RAG data"
-        - name: ""
-          description: "Directory containing input files for processing"
-          value: "{{ args.inputdir }}"
-          if: "{{ args.paths }}"
-        - name: ""
-          description: "URLs to process"
-          value: "{{ args.urls }}"
   - name: convert
     inference_engine:
       name: "convert hf to gguf"

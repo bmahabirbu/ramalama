@@ -14,8 +14,6 @@ from ramalama.log_levels import LogLevel, coerce_log_level
 from ramalama.toml_parser import TOMLParser
 
 DEFAULT_IMAGE: str = "quay.io/ramalama/ramalama"
-DEFAULT_STACK_IMAGE: str = "quay.io/ramalama/llama-stack"
-DEFAULT_RAG_IMAGE: str = "quay.io/ramalama/ramalama-rag"
 GGUF_QUANTIZATION_MODES: TypeAlias = Literal[
     "Q2_K",
     "Q3_K_S",
@@ -199,27 +197,7 @@ class RamalamaImageConfig:
 
 @dataclass
 class RamalamaImages(RamalamaImageConfig):
-    ASAHI_VISIBLE_DEVICES: str = "quay.io/ramalama/asahi"
-    ASCEND_VISIBLE_DEVICES: str = "quay.io/ramalama/cann"
-    CUDA_VISIBLE_DEVICES: str = "quay.io/ramalama/cuda"
     GGML_VK_VISIBLE_DEVICES: str = "quay.io/ramalama/ramalama"
-    HIP_VISIBLE_DEVICES: str = "quay.io/ramalama/rocm"
-    INTEL_VISIBLE_DEVICES: str = "quay.io/ramalama/intel-gpu"
-    MUSA_VISIBLE_DEVICES: str = "quay.io/ramalama/musa"
-    VLLM_ASAHI_VISIBLE_DEVICES: str = "docker.io/vllm/vllm-openai"
-    VLLM_ASCEND_VISIBLE_DEVICES: str = "docker.io/vllm/vllm-openai"
-    VLLM_CUDA_VISIBLE_DEVICES: str = "docker.io/vllm/vllm-openai"
-    VLLM_GGML_VK_VISIBLE_DEVICES: str = "docker.io/vllm/vllm-openai"
-    VLLM_HIP_VISIBLE_DEVICES: str = "docker.io/vllm/vllm-openai"
-    VLLM_INTEL_VISIBLE_DEVICES: str = "docker.io/vllm/vllm-openai"
-    VLLM_MUSA_VISIBLE_DEVICES: str = "docker.io/vllm/vllm-openai"
-
-
-@dataclass
-class RamalamaRagImages(RamalamaImageConfig):
-    CUDA_VISIBLE_DEVICES: str = "quay.io/ramalama/cuda-rag"
-    HIP_VISIBLE_DEVICES: str = "quay.io/ramalama/rocm-rag"
-    INTEL_VISIBLE_DEVICES: str = "quay.io/ramalama/intel-gpu-rag"
 
 
 @dataclass
@@ -238,8 +216,6 @@ class HTTPClientConfig:
 
 @dataclass
 class BaseConfig:
-    api: str = "none"
-    api_key: str | None = None
     benchmarks: Benchmarks = field(default_factory=Benchmarks)
     cache_reuse: int = 256
     carimage: str = "registry.access.redhat.com/ubi10-micro:latest"
@@ -247,7 +223,6 @@ class BaseConfig:
     ctx_size: int = 0
     convert_type: Literal["artifact", "car", "raw"] = "raw"
     default_image: str = DEFAULT_IMAGE
-    default_rag_image: str = DEFAULT_RAG_IMAGE
     dryrun: bool = False
     engine: SUPPORTED_ENGINES | None = field(default_factory=get_default_engine)
     env: list[str] = field(default_factory=list)
@@ -256,30 +231,22 @@ class BaseConfig:
     http_client: HTTPClientConfig = field(default_factory=HTTPClientConfig)
     image: str = None  # type: ignore
     images: RamalamaImages = field(default_factory=RamalamaImages)
-    rag_image: str | None = None
-    rag_images: RamalamaRagImages = field(default_factory=RamalamaRagImages)
     keep_groups: bool = False
     log_level: LogLevel | None = None
     max_tokens: int = 0
     ngl: int = -1
-    ocr: bool = False
     port: str = "8080"
-    prefix: str = None  # type: ignore
     pull: str = "newer"
-    rag_format: Literal["qdrant", "json", "markdown", "milvus"] = "qdrant"
     runtime: SUPPORTED_RUNTIMES = "llama.cpp"
     selinux: bool = False
     settings: RamalamaSettings = field(default_factory=RamalamaSettings)
-    stack_image: str = DEFAULT_STACK_IMAGE
     store: str = field(default_factory=get_default_store)
-    summarize_after: int = 4
     temp: str = "0.8"
     thinking: bool = True
     threads: int = -1
     transport: str = "ollama"
     user: UserConfig = field(default_factory=UserConfig)
     verify: bool = True
-    provider: ProviderConfig = field(default_factory=ProviderConfig)
 
     def __post_init__(self):
         self.container = coerce_to_bool(self.container) if self.container is not None else self.engine is not None
@@ -375,15 +342,15 @@ def load_env_config(env: Mapping[str, str] | None = None) -> dict[str, Any]:
     if 'env' in config:
         config['env'] = config['env'].split(',')
 
-    for key in ['images', 'rag_images']:
+    for key in ['images']:
         if key in config:
             config[key] = json.loads(config[key])
 
-    for key in ['ocr', 'keep_groups', 'container', 'verify']:
+    for key in ['keep_groups', 'container', 'verify']:
         if key in config:
             config[key] = coerce_to_bool(config[key])
 
-    for key in ['threads', 'ctx_size', 'ngl', 'summarize_after']:
+    for key in ['threads', 'ctx_size', 'ngl']:
         if key in config:
             config[key] = int(config[key])
     if log_level := config.get("log_level"):

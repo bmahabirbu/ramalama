@@ -47,7 +47,7 @@ def test_max_tokens_cli_argument_help():
     """Test that --max-tokens argument appears in help for supported commands"""
 
     # Test commands that should have --max-tokens
-    supported_commands = ["run", "serve", "perplexity"]
+    supported_commands = ["serve"]
 
     for command in supported_commands:
         result = run_ramalama_direct([command, "--help"])
@@ -62,7 +62,7 @@ def test_max_tokens_argument_parsing():
     # Test that --max-tokens doesn't cause argument parsing errors
     # by checking help with the argument present
     try:
-        result = run_ramalama_direct(["run", "--max-tokens", "512", "--help"])
+        result = run_ramalama_direct(["serve", "--max-tokens", "512", "--help"])
         # If we get here, the argument was parsed successfully
         assert "--max-tokens" in result
     except CalledProcessError as e:
@@ -79,7 +79,7 @@ def test_max_tokens_valid_values():
 
     for value in valid_values:
         try:
-            result = run_ramalama_direct(["run", "--max-tokens", value, "--help"])
+            result = run_ramalama_direct(["serve", "--max-tokens", value, "--help"])
             # Should not raise parsing errors
             assert "--max-tokens" in result
         except CalledProcessError as e:
@@ -90,7 +90,7 @@ def test_max_tokens_valid_values():
 def test_max_tokens_default_value():
     """Test that max_tokens has a sensible default value"""
 
-    result = run_ramalama_direct(["run", "--help"])
+    result = run_ramalama_direct(["serve", "--help"])
 
     # Check that the default is mentioned in help (should show 0)
     # Look for the max-tokens line and check it shows default: 0
@@ -107,7 +107,7 @@ def test_max_tokens_invalid_value():
 
     # Test with invalid string value (should be rejected by argparse type checking)
     try:
-        run_ramalama_direct(["run", "--max-tokens", "invalid", "--help"])
+        run_ramalama_direct(["serve", "--max-tokens", "invalid", "--help"])
         # If no exception, this is unexpected but we'll allow it for now
     except CalledProcessError as e:
         # Should fail due to invalid type conversion, not unrecognized argument
@@ -122,7 +122,7 @@ def test_max_tokens_negative_value():
 
     # Negative values should be accepted by argparse (int type allows them)
     try:
-        result = run_ramalama_direct(["run", "--max-tokens", "-1", "--help"])
+        result = run_ramalama_direct(["serve", "--max-tokens", "-1", "--help"])
         # Should not raise parsing errors
         assert "--max-tokens" in result
     except CalledProcessError as e:

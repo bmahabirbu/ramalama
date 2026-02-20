@@ -31,7 +31,7 @@ def extract_title_and_description(content, filename):
     if base_name == 'ramalama.1.md':
         title = 'ramalama'  # Base command page
     elif base_name.startswith('ramalama-') and base_name.endswith('.1.md'):
-        # Command pages: ramalama-chat.1.md -> chat
+        # Command pages: ramalama-serve.1.md -> serve
         title = base_name.replace('ramalama-', '').replace('.1.md', '')
     elif base_name.endswith('.7.md'):
         # Platform guides: ramalama-cuda.7.md -> CUDA Support
@@ -261,7 +261,7 @@ def get_output_filename(input_filename):
         # Base ramalama command goes in commands directory
         return 'ramalama.mdx'
     if base.startswith('ramalama-') and base.endswith('.1.md'):
-        # Command: ramalama-chat.1.md -> chat.mdx
+        # Command: ramalama-serve.1.md -> serve.mdx
         return base.replace('ramalama-', '').replace('.1.md', '.mdx')
     if base.startswith('ramalama-') and base.endswith('.7.md'):
         # Platform guide: ramalama-cuda.7.md -> cuda.mdx

@@ -4,7 +4,7 @@ import os
 import shlex
 from typing import Optional, Tuple
 
-from ramalama.common import RAG_DIR, get_accel_env_vars
+from ramalama.common import get_accel_env_vars
 from ramalama.file import PlainFile
 from ramalama.version import version
 
@@ -39,10 +39,6 @@ class Compose:
         # Model Volume
         volumes += self._gen_model_volume()
 
-        # RAG Volume
-        if getattr(self.args, "rag", None):
-            volumes += self._gen_rag_volume()
-
         # Chat Template Volume
         if self.src_chat_template_path and os.path.exists(self.src_chat_template_path):
             volumes += self._gen_chat_template_volume()
@@ -55,29 +51,6 @@ class Compose:
 
     def _gen_model_volume(self) -> str:
         return f'\n      - "{self.src_model_path}:{self.dest_model_path}:ro"'
-
-    def _gen_rag_volume(self) -> str:
-        rag_source = self.args.rag
-        volume_str = ""
-
-        if rag_source.startswith("oci:") or rag_source.startswith("oci://"):
-            if rag_source.startswith("oci://"):
-                oci_image = rag_source.removeprefix("oci://")
-            else:
-                oci_image = rag_source.removeprefix("oci:")
-            # This is the standard long-form syntax for image volumes, now supported by Docker.
-            volume_str = f"""
-      - type: image
-        source: {oci_image}
-        target: {RAG_DIR}
-        image:
-          readonly: true"""
-
-        elif os.path.exists(rag_source):
-            # Standard host path mount
-            volume_str = f'\n      - "{rag_source}:{RAG_DIR}:ro"'
-
-        return volume_str
 
     def _gen_chat_template_volume(self) -> str:
         return f'\n      - "{self.src_chat_template_path}:{self.dest_chat_template_path}:ro"'

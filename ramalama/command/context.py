@@ -2,7 +2,7 @@ import argparse
 import os
 from typing import Optional
 
-from ramalama.common import check_metal, check_nvidia
+from ramalama.common import get_accel
 from ramalama.console import should_colorize
 from ramalama.transports.transport_factory import CLASS_MODEL_TYPES, New
 
@@ -51,46 +51,6 @@ class RamalamaArgsContext:
         return ctx
 
 
-class RamalamaRagGenArgsContext:
-
-    def __init__(self) -> None:
-        self.debug: bool | None = None
-        self.format: str | None = None
-        self.ocr: bool | None = None
-        self.inputdir: str | None = None
-        self.paths: list[str] | None = None
-        self.urls: list[str] | None = None
-
-    @staticmethod
-    def from_argparse(args: argparse.Namespace) -> "RamalamaRagGenArgsContext":
-        ctx = RamalamaRagGenArgsContext()
-        ctx.debug = getattr(args, "debug", None)
-        ctx.format = getattr(args, "format", None)
-        ctx.ocr = getattr(args, "ocr", None)
-        ctx.inputdir = getattr(args, "inputdir", None)
-        ctx.paths = getattr(args, "PATHS", None)
-        ctx.urls = getattr(args, "urls", None)
-        return ctx
-
-
-class RamalamaRagArgsContext:
-
-    def __init__(self) -> None:
-        self.debug: bool | None = None
-        self.port: str | None = None
-        self.model_host: str | None = None
-        self.model_port: str | None = None
-
-    @staticmethod
-    def from_argparse(args: argparse.Namespace) -> "RamalamaRagArgsContext":
-        ctx = RamalamaRagArgsContext()
-        ctx.debug = getattr(args, "debug", None)
-        ctx.port = getattr(args, "port", None)
-        ctx.model_host = getattr(args, "model_host", None)
-        ctx.model_port = getattr(args, "model_port", None)
-        return ctx
-
-
 class RamalamaModelContext:
 
     def __init__(self, model: CLASS_MODEL_TYPES, is_container: bool, should_generate: bool, dry_run: bool):
@@ -130,11 +90,10 @@ class RamalamaModelContext:
 class RamalamaHostContext:
 
     def __init__(
-        self, is_container: bool, uses_nvidia: bool, uses_metal: bool, should_colorize: bool, rpc_nodes: Optional[str]
+        self, is_container: bool, uses_vulkan: bool, should_colorize: bool, rpc_nodes: Optional[str]
     ):
         self.is_container = is_container
-        self.uses_nvidia = uses_nvidia
-        self.uses_metal = uses_metal
+        self.uses_vulkan = uses_vulkan
         self.should_colorize = should_colorize
         self.rpc_nodes = rpc_nodes
 
@@ -143,7 +102,7 @@ class RamalamaCommandContext:
 
     def __init__(
         self,
-        args: RamalamaArgsContext | RamalamaRagGenArgsContext | RamalamaRagArgsContext,
+        args: RamalamaArgsContext,
         model: RamalamaModelContext | None,
         host: RamalamaHostContext,
     ):
@@ -153,13 +112,7 @@ class RamalamaCommandContext:
 
     @staticmethod
     def from_argparse(cli_args: argparse.Namespace) -> "RamalamaCommandContext":
-        args: RamalamaArgsContext | RamalamaRagGenArgsContext | RamalamaRagArgsContext
-        if cli_args.subcommand == "rag":
-            args = RamalamaRagGenArgsContext.from_argparse(cli_args)
-        elif cli_args.subcommand in ("run --rag", "serve --rag"):
-            args = RamalamaRagArgsContext.from_argparse(cli_args)
-        else:
-            args = RamalamaArgsContext.from_argparse(cli_args)
+        args = RamalamaArgsContext.from_argparse(cli_args)
         should_generate = getattr(cli_args, "generate", None) is not None
         dry_run = getattr(cli_args, "dryrun", False)
         is_container = getattr(cli_args, "container", True)
@@ -172,8 +125,7 @@ class RamalamaCommandContext:
 
         host = RamalamaHostContext(
             is_container,
-            check_nvidia() is not None,
-            check_metal(argparse.Namespace(**{"container": is_container})),
+            get_accel() == "vulkan",
             should_colorize(),
             os.getenv("RAMALAMA_LLAMACPP_RPC_NODES", None),
         )

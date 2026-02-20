@@ -1,23 +1,18 @@
 import itertools
 import json
-import logging
 import os
 import platform
 import random
 import re
 import string
-import time
 from contextlib import contextmanager
 from pathlib import Path
 from subprocess import STDOUT, CalledProcessError
 from test.conftest import (
     skip_if_container,
-    skip_if_darwin,
     skip_if_docker,
     skip_if_gh_actions_darwin,
     skip_if_no_container,
-    skip_if_ppc64le,
-    skip_if_s390x,
 )
 from test.e2e.utils import RamalamaExecWorkspace, check_output, get_full_model_name
 
@@ -295,21 +290,9 @@ def test_serve_and_stop(shared_ctx, test_model):
     # Serve Container1
     ctx.check_call(["ramalama", "serve", "--name", container1_id, "--detach", test_model])
 
-    # FIXME: race-condition, chat can fail to connect if llama.cpp isn't ready, just sleep a little for now
-    time.sleep(10)
-
     try:
-        info = json.loads(ctx.check_output(["ramalama", "info"]))
-        full_model_name = info["Shortnames"]["Names"][test_model]
-
         ps_result = ctx.check_output(["ramalama", "ps"])
         assert re.search(f".*{container1_id}", ps_result)
-
-        ps_list = ctx.check_output(["ramalama", "ps", "--format", "{{.Names}} {{.Ports}}"])
-        port = re.search(rf"{container1_id}.*->(?P<port>\d+)", ps_list)["port"]
-
-        chat_result = ctx.check_output(["ramalama", "chat", "--ls", "--url", f"http://127.0.0.1:{port}/v1"]).strip()
-        assert chat_result == full_model_name.split("://")[-1]
 
         containers_list = ctx.check_output(["ramalama", "containers", "--noheading"])
         assert re.search(f".*{container1_id}", containers_list)
@@ -401,14 +384,14 @@ def test_quadlet_generation(shared_ctx, test_model):
     container_file = Path(ctx.workspace_dir) / f"{test_model_full_name}.container"
     ctx.check_call(
         ["ramalama", "serve", "--port", "1234", "--pull", "never", "--generate", "quadlet", test_model],
-        env={"HIP_VISIBLE_DEVICES": "99"},
+        env={"GGML_VK_VISIBLE_DEVICES": "99"},
     )
     with container_file.open("r") as f:
         content = f.read()
         assert re.search(r".*PublishPort=0.0.0.0:1234:1234", content)
         assert re.search(r".*llama-server --host 0.0.0.0 --port 1234 --model .*", content)
         assert re.search(f".*Mount=type=bind,.*{test_model_full_name}", content)
-        assert re.search(r".*Environment=HIP_VISIBLE_DEVICES=99", content)
+        assert re.search(r".*Environment=GGML_VK_VISIBLE_DEVICES=99", content)
 
 
 @pytest.mark.e2e
@@ -584,7 +567,7 @@ def test_quadlet_and_kube_generation_with_container_registry(container_registry,
                 "compose",
                 "compose:{tmp_dir}{sep}output",
             ],
-            [None, {"HIP_VISIBLE_DEVICES": "99"}],
+            [None, {"GGML_VK_VISIBLE_DEVICES": "99"}],
         )
     ],
 )
@@ -647,11 +630,11 @@ def test_serve_kube_generation(test_model, generate, env_vars):
                 if env_vars:
                     if "kube" in generate:
                         assert re.search(r".*env:", content)
-                        assert re.search(r".*name: HIP_VISIBLE_DEVICES", content)
+                        assert re.search(r".*name: GGML_VK_VISIBLE_DEVICES", content)
                         assert re.search(r".*value: \"99\"", content)
                     elif "compose" in generate:
                         assert re.search(r".*environment:", content)
-                        assert re.search(r".*- HIP_VISIBLE_DEVICES=99", content)
+                        assert re.search(r".*- GGML_VK_VISIBLE_DEVICES=99", content)
                     else:
                         raise Exception("Invalid generate option")
 
@@ -660,95 +643,6 @@ def test_serve_kube_generation(test_model, generate, env_vars):
                 with (output_dir / "test.kube").open("r") as f:
                     content = f.read()
                     assert re.search(r".*Yaml=test.yaml", content)
-
-
-@pytest.mark.e2e
-@skip_if_no_container
-@skip_if_docker
-def test_kube_generation_with_llama_api(test_model):
-    with RamalamaExecWorkspace() as ctx:
-        # Pull model
-        ctx.check_call(["ramalama", "pull", test_model])
-
-        # Exec ramalama serve
-        result = ctx.check_output(
-            [
-                "ramalama",
-                "serve",
-                "--name",
-                "test",
-                "--port",
-                "1234",
-                "--generate",
-                "kube",
-                "--api",
-                "llama-stack",
-                "--dri",
-                "off",
-                test_model,
-            ]
-        )
-
-        # Test the expected output of the command execution
-        assert re.search(r".*Generating Kubernetes YAML file: test.yaml", result)
-
-        # Check "test.yaml" contents
-        with (Path(ctx.workspace_dir) / "test.yaml").open("r") as f:
-            content = f.read()
-            assert re.search(r".*llama-server", content)
-            assert re.search(r".*hostPort: 1234", content)
-            assert re.search(r".*/llama-stack", content)
-
-
-@pytest.mark.skip(reason="pulls very large image")
-@pytest.mark.e2e
-@skip_if_docker
-@skip_if_no_container
-@skip_if_ppc64le
-@skip_if_s390x
-def test_serve_api(caplog):
-    # Configure logging for requests
-    caplog.set_level(logging.CRITICAL, logger="requests")
-    caplog.set_level(logging.CRITICAL, logger="urllib3")
-    test_model = "tiny"
-
-    with RamalamaExecWorkspace() as ctx:
-        # Pull model
-        ctx.check_call(["ramalama", "pull", test_model])
-
-        # Serve an API
-        container_name = f"api{''.join(random.choices(string.ascii_letters + string.digits, k=5))}"
-        container_port = random.randint(64000, 65000)
-
-        result = ctx.check_output(
-            [
-                "ramalama",
-                "serve",
-                "-d",
-                "--name",
-                container_name,
-                "--port",
-                str(container_port),
-                "--api",
-                "llama-stack",
-                "--dri",
-                "off",
-                test_model,
-            ],
-            stderr=STDOUT,
-        )
-
-        assert re.search(fr".*Llama Stack RESTAPI: http://localhost:{container_port}", result)
-        assert re.search(fr".*OpenAI RESTAPI: http://localhost:{container_port}/v1/openai", result)
-
-        # Inspect the models API
-        # FIXME: llama-stack image is currently broken.
-        # models = requests.get(f"http://localhost:{container_port}/models").json()
-        # assert models["models"][0]["name"] == test_model
-        # assert models["models"][0]["model"] == test_model
-
-        # Stop container
-        ctx.check_call(["ramalama", "stop", container_name])
 
 
 @pytest.mark.e2e
@@ -765,66 +659,3 @@ def test_serve_with_non_existing_images():
             ctx.check_output(["ramalama", "serve", "--image", "bogus", "--pull", "never", "tiny"], stderr=STDOUT)
         assert exc_info.value.returncode == 125
         assert re.search(r".*Error: bogus: image not known", exc_info.value.output.decode("utf-8"))
-
-        with pytest.raises(CalledProcessError) as exc_info:
-            ctx.check_output(
-                [
-                    "ramalama",
-                    "serve",
-                    "--image",
-                    "bogus1",
-                    "--rag",
-                    "quay.io/ramalama/rag",
-                    "--pull",
-                    "never",
-                    "tiny",
-                ],
-                stderr=STDOUT,
-            )
-        assert exc_info.value.returncode == 22
-        assert re.search(r"Error: quay.io/ramalama/rag does not exist.*", exc_info.value.output.decode("utf-8"))
-
-
-@pytest.mark.e2e
-@skip_if_no_container
-@skip_if_darwin
-@skip_if_docker
-def test_serve_with_rag():
-    with RamalamaExecWorkspace() as ctx:
-        result_a = ctx.check_output(RAMALAMA_DRY_RUN + ["--rag", "quay.io/ramalama/rag", "--pull", "never", "tiny"])
-        assert re.search(r".*llama-server", result_a)
-        assert re.search(r".*quay.io/.*-rag(@sha256)?:", result_a)
-        assert re.search(r".*rag_framework serve", result_a)
-        assert re.search(r".*--mount=type=image,source=quay.io/ramalama/rag,destination=/rag,rw=true", result_a)
-
-        result_b = ctx.check_output(
-            [
-                "ramalama",
-                "--dryrun",
-                "serve",
-                "--image",
-                "quay.io/ramalama/ramalama:1.0",
-                "--rag",
-                "quay.io/ramalama/rag",
-                "--pull",
-                "never",
-                "tiny",
-            ]
-        )
-        assert re.search(r".*quay.io/ramalama/ramalama:1.0", result_b)
-
-        result_c = ctx.check_output(
-            [
-                "ramalama",
-                "--dryrun",
-                "serve",
-                "--rag",
-                "quay.io/ramalama/rag",
-                "--rag-image",
-                "quay.io/ramalama/ramalama-rag:1.0",
-                "--pull",
-                "never",
-                "tiny",
-            ]
-        )
-        assert re.search(r".*quay.io/ramalama/ramalama-rag:1.0", result_c)

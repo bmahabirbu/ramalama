@@ -1,4 +1,3 @@
-import glob
 import json
 import os
 import subprocess
@@ -9,10 +8,9 @@ from collections.abc import Callable, Sequence
 from http.client import HTTPConnection, HTTPException
 from typing import Any
 
-# Live reference for checking global vars
 import ramalama.common
 from ramalama.arg_types import BaseEngineArgsType
-from ramalama.common import check_nvidia, exec_cmd, get_accel_env_vars, perror, run_cmd
+from ramalama.common import exec_cmd, perror, run_cmd
 from ramalama.compat import NamedTemporaryFile
 from ramalama.config import get_config
 from ramalama.logger import logger
@@ -69,12 +67,6 @@ class BaseEngine(ABC):
     def add_oci_runtime(self):
         if getattr(self.args, "oci_runtime", None):
             self.exec_args += ["--runtime", self.args.oci_runtime]
-            return
-        if check_nvidia() == "cuda":
-            if self.use_docker:
-                self.exec_args += ["--runtime", "nvidia"]
-            elif os.access("/usr/bin/nvidia-container-runtime", os.X_OK):
-                self.exec_args += ["--runtime", "/usr/bin/nvidia-container-runtime"]
 
     def add_privileged_options(self):
         if not getattr(self.args, "selinux", False):
@@ -92,25 +84,21 @@ class BaseEngine(ABC):
             for device_arg in self.args.device:
                 self.exec_args += ["--device", device_arg]
 
+        # macOS libkrun: virtio-gpu exposed as /dev/dri inside the VM
         if ramalama.common.podman_machine_accel:
             self.exec_args += ["--device", "/dev/dri"]
 
-        for path in ["/dev/dri", "/dev/kfd", "/dev/accel", "/dev/davinci*", "/dev/devmm_svm", "/dev/hisi_hdc"]:
-            for dev in glob.glob(path):
-                self.exec_args += ["--device", dev]
-
-        for k, v in get_accel_env_vars().items():
-            # Special case for Cuda
-            if k == "CUDA_VISIBLE_DEVICES":
-                if self.use_docker:
-                    self.exec_args += ["--gpus", "all"]
-                else:
-                    # newer Podman versions support --gpus=all, but < 5.0 do not
-                    self.exec_args += ["--device", "nvidia.com/gpu=all"]
-            elif k == "MUSA_VISIBLE_DEVICES":
-                self.exec_args += ["--env", "MTHREADS_VISIBLE_DEVICES=all"]
-
-            self.exec_args += ["-e", f"{k}={v}"]
+        # WSL2 / Windows Podman Machine: /dev/dxg + WSL GPU driver libraries
+        if os.path.exists("/dev/dxg"):
+            self.exec_args += ["--device", "/dev/dxg"]
+            if os.path.isdir("/usr/lib/wsl"):
+                self.exec_args += [
+                    "--mount", "type=bind,src=/usr/lib/wsl,dst=/usr/lib/wsl,readonly",
+                    "--env", "LD_LIBRARY_PATH=/usr/lib/wsl/lib",
+                ]
+        # Native Linux: /dev/dri for Vulkan
+        elif os.path.exists("/dev/dri"):
+            self.exec_args += ["--device", "/dev/dri"]
 
     def handle_podman_specifics(self):
         if getattr(self.args, "podman_keep_groups", None):
@@ -156,12 +144,7 @@ class Engine(BaseEngine):
         self.add_tty_option()
 
     def base_args(self) -> None:
-        # For run command, do not use --rm to auto-remove container on exit
-        subcommand = getattr(self.args, "subcommand", "")
-        if subcommand == "run":
-            self.add_args("run")
-        else:
-            self.add_args("run", "--rm")
+        self.add_args("run", "--rm")
 
     def add_name(self, name: str) -> None:
         self.add_args("--name", name)
@@ -197,16 +180,8 @@ class Engine(BaseEngine):
         else:
             super().add_privileged_options()
 
-    def use_tty(self) -> bool:
-        if not sys.stdin.isatty():
-            return False
-        if getattr(self.args, "ARGS", None):
-            return False
-        return getattr(self.args, "subcommand", "") == "run"
-
     def add_tty_option(self) -> None:
-        if self.use_tty():
-            self.add_args("-t")
+        pass
 
 
 class BuildEngine(BaseEngine):
