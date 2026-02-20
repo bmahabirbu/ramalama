@@ -1,4 +1,5 @@
 import argparse
+import os
 
 from ramalama.cli._parser import CoerceToBool, OverrideDefaultAction, default_image
 from ramalama.cli._utils import (
@@ -20,13 +21,24 @@ from ramalama.transports.transport_factory import New, TransportFactory
 def register(subparsers):
     parser = subparsers.add_parser("serve", help="serve REST API on specified AI Model")
     runtime_options(parser)
-    parser.add_argument("MODEL", completer=local_models)
+    parser.add_argument("MODEL", nargs="?", default=None, completer=local_models)
+    parser.add_argument(
+        "--models-max",
+        dest="models_max",
+        type=int,
+        default=4,
+        help="maximum number of models to load concurrently in router mode (default: 4)",
+        completer=suppressCompleter,
+    )
     parser.set_defaults(func=serve_cli)
 
 
 def serve_cli(args):
     if not args.container:
         args.detach = False
+
+    if args.MODEL is None:
+        return _serve_router(args)
 
     try:
         args.port = compute_serving_port(args)
@@ -44,6 +56,89 @@ def serve_cli(args):
             raise e
 
     model.serve(args, assemble_command_lazy(args))
+
+
+def _serve_router(args):
+    """Serve all locally stored GGUF models using llama.cpp router mode (container-only)."""
+    if not args.container:
+        raise NotImplementedError("Router mode (ramalama serve with no model) requires a container runtime.")
+
+    from ramalama.model_store.constants import DIRECTORY_NAME_BLOBS, DIRECTORY_NAME_REFS, DIRECTORY_NAME_SNAPSHOTS
+    from ramalama.model_store.global_store import GlobalModelStore
+    from ramalama.model_store.reffile import RefJSONFile, migrate_reffile_to_refjsonfile
+    from ramalama.runtime.engine import Engine
+    from ramalama.utils.common import genname, set_accel_env_vars
+    from ramalama.utils.path_utils import get_container_mount_path
+
+    set_accel_env_vars()
+    args.port = compute_serving_port(args)
+    args.router_mode = True
+
+    models = _enumerate_store_gguf_models(
+        GlobalModelStore(args.store),
+        DIRECTORY_NAME_REFS,
+        DIRECTORY_NAME_SNAPSHOTS,
+        DIRECTORY_NAME_BLOBS,
+        RefJSONFile,
+        migrate_reffile_to_refjsonfile,
+    )
+
+    if not models:
+        raise IndexError("No GGUF models found in the model store. Pull a model first with: ramalama pull <model>")
+
+    cmd = assemble_command_lazy(args)
+    engine = Engine(args)
+    name = getattr(args, "name", None) or genname()
+    engine.add(["--label", "ai.ramalama", "--name", name, "--env=HOME=/tmp", "--init"])
+
+    for host_path, container_name in models:
+        mount_path = f"/mnt/models/{container_name}"
+        container_host_path = get_container_mount_path(host_path)
+        engine.add([f"--mount=type=bind,src={container_host_path},destination={mount_path},ro"])
+
+    engine.add([args.image] + cmd)
+
+    if args.dryrun:
+        engine.dryrun()
+        return
+    engine.exec()
+
+
+def _enumerate_store_gguf_models(store, refs_dir_name, snapshots_dir_name, blobs_dir_name, RefJSONFile, migrate_fn):
+    """Walk the model store and return (host_blob_path, readable_name.gguf) for each GGUF model."""
+    from ramalama.utils.common import sanitize_filename
+
+    models = []
+    seen_names = set()
+
+    for root, subdirs, _ in os.walk(store.path):
+        if refs_dir_name not in subdirs:
+            continue
+
+        ref_dir = os.path.join(root, refs_dir_name)
+        for ref_file_name in os.listdir(ref_dir):
+            ref_file_path = os.path.join(ref_dir, ref_file_name)
+            ref_file = migrate_fn(ref_file_path, os.path.join(root, snapshots_dir_name))
+            if ref_file is None:
+                ref_file = RefJSONFile.from_path(ref_file_path)
+
+            tag = ref_file_name.replace(".json", "")
+            model_rel = root.replace(store.path, "").lstrip(os.sep)
+            parts = model_rel.split(os.sep)
+            readable = "-".join(parts + [tag])
+
+            for model_file in ref_file.model_files:
+                blob_path = os.path.join(root, blobs_dir_name, sanitize_filename(model_file.hash))
+                if not os.path.exists(blob_path):
+                    continue
+
+                name = f"{readable}.gguf"
+                if name in seen_names:
+                    name = f"{readable}-{model_file.hash[:8]}.gguf"
+                seen_names.add(name)
+                models.append((blob_path, name))
+
+    return models
 
 
 def runtime_options(parser):

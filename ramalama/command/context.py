@@ -2,9 +2,9 @@ import argparse
 import os
 from typing import Optional
 
+from ramalama.transports.transport_factory import CLASS_MODEL_TYPES, New
 from ramalama.utils.common import get_accel
 from ramalama.utils.console import should_colorize
-from ramalama.transports.transport_factory import CLASS_MODEL_TYPES, New
 
 
 class RamalamaArgsContext:
@@ -27,6 +27,8 @@ class RamalamaArgsContext:
         self.thinking: Optional[bool] = None
         self.threads: Optional[int] = None
         self.webui: Optional[bool] = None
+        self.router_mode: bool = False
+        self.models_max: int = 4
 
     @staticmethod
     def from_argparse(args: argparse.Namespace) -> "RamalamaArgsContext":
@@ -48,6 +50,8 @@ class RamalamaArgsContext:
         ctx.thinking = getattr(args, "thinking", None)
         ctx.threads = getattr(args, "threads", None)
         ctx.webui = getattr(args, "webui", None)
+        ctx.router_mode = getattr(args, "router_mode", False)
+        ctx.models_max = getattr(args, "models_max", 4)
         return ctx
 
 
@@ -116,7 +120,7 @@ class RamalamaCommandContext:
         should_generate = getattr(cli_args, "generate", None) is not None
         dry_run = getattr(cli_args, "dryrun", False)
         is_container = getattr(cli_args, "container", True)
-        if hasattr(cli_args, "MODEL"):
+        if hasattr(cli_args, "MODEL") and cli_args.MODEL is not None:
             model = RamalamaModelContext(New(cli_args.MODEL, cli_args), is_container, should_generate, dry_run)
         elif hasattr(cli_args, "model"):
             model = cli_args.model
