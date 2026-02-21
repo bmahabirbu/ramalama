@@ -26,10 +26,14 @@ class LlamaCppEmbedder:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed a list of texts in batches and return their vectors."""
+        total = len(texts)
         all_embeddings: list[list[float]] = []
-        for i in range(0, len(texts), EMBEDDING_BATCH_SIZE):
+        for i in range(0, total, EMBEDDING_BATCH_SIZE):
             batch = texts[i : i + EMBEDDING_BATCH_SIZE]
             all_embeddings.extend(self._embed_batch(batch))
+            done = min(i + EMBEDDING_BATCH_SIZE, total)
+            print(f"\r  Embedding {done}/{total} chunks...", end="", flush=True)
+        print()
         return all_embeddings
 
     def _embed_batch(self, texts: list[str]) -> list[list[float]]:

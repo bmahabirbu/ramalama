@@ -13,7 +13,8 @@ from ramalama.utils.logger import logger
 
 IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif"})
 PDF_EXTENSIONS = frozenset({".pdf"})
-SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | PDF_EXTENSIONS
+TEXT_EXTENSIONS = frozenset({".txt", ".md", ".html", ".htm"})
+SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | PDF_EXTENSIONS | TEXT_EXTENSIONS
 
 
 class GraniteDoclingConverter:
@@ -56,11 +57,19 @@ class GraniteDoclingConverter:
 
         return result["choices"][0]["message"]["content"]
 
-    def convert_file(self, file_path: Path, name: str | None = None):
-        """Convert a single file (PDF or image) and return a ``DoclingDocument``."""
-        if file_path.suffix.lower() in PDF_EXTENSIONS:
+    def convert_file(self, file_path: Path, name: str | None = None) -> list:
+        """Convert a single file and return a list of documents.
+
+        Text files (.txt, .md, .html) are read directly and returned as raw
+        strings -- no VLM needed.  Images produce a single ``DoclingDocument``.
+        PDFs produce one ``DoclingDocument`` per page.
+        """
+        suffix = file_path.suffix.lower()
+        if suffix in TEXT_EXTENSIONS:
+            return [_read_text_file(file_path)]
+        if suffix in PDF_EXTENSIONS:
             return self._convert_pdf(file_path, name)
-        return self._convert_image(file_path, name)
+        return [self._convert_image(file_path, name)]
 
     def _convert_image(self, image_path: Path, name: str | None = None):
         """Convert a single image file via DocTags and return a ``DoclingDocument``."""
@@ -80,8 +89,12 @@ class GraniteDoclingConverter:
         logger.debug(f"DoclingDocument for {image_path.name} ({len(list(doc.iterate_items()))} items)")
         return doc
 
-    def _convert_pdf(self, pdf_path: Path, name: str | None = None):
-        """Render each page of a PDF to an image, send to VLM, return a ``DoclingDocument``."""
+    def _convert_pdf(self, pdf_path: Path, name: str | None = None) -> list:
+        """Render each page of a PDF one at a time, returning one ``DoclingDocument`` per page.
+
+        Only a single page image is held in memory at any point, keeping RAM
+        usage constant regardless of the total page count.
+        """
         DoclingDocument, DocTagsDocument = _import_docling()
 
         try:
@@ -96,27 +109,25 @@ class GraniteDoclingConverter:
 
         pdf = pdfium.PdfDocument(str(pdf_path))
         n_pages = len(pdf)
-
-        all_doctags: list[str] = []
-        all_images: list = []
+        docs: list = []
 
         for page_idx in range(n_pages):
             page = pdf[page_idx]
             pil_image = page.render(scale=2).to_pil().convert("RGB")
             logger.debug(f"Converting {pdf_path.name} page {page_idx + 1}/{n_pages}")
-            print(f"  Page {page_idx + 1}/{n_pages}...", end=" ", flush=True)
+            print(f"\r  Page {page_idx + 1}/{n_pages}...", end="", flush=True)
 
             doctags = self._send_pil_image(pil_image)
             logger.debug(f"DocTags for {pdf_path.name} page {page_idx + 1} ({len(doctags)} chars)")
-            all_doctags.append(doctags)
-            all_images.append(pil_image)
+
+            doctags_doc = DocTagsDocument.from_doctags_and_image_pairs([doctags], [pil_image])
+            doc = DoclingDocument.load_from_doctags(doctags_doc, document_name=f"{name}_p{page_idx + 1}")
+            docs.append(doc)
+            del pil_image
 
         pdf.close()
-
-        doctags_doc = DocTagsDocument.from_doctags_and_image_pairs(all_doctags, all_images)
-        doc = DoclingDocument.load_from_doctags(doctags_doc, document_name=name)
-        logger.debug(f"DoclingDocument for {pdf_path.name} ({len(list(doc.iterate_items()))} items)")
-        return doc
+        print()
+        return docs
 
     def convert_directory(self, source_path: str | Path) -> list:
         """Convert every supported file under *source_path* and return a list of ``DoclingDocument`` objects."""
@@ -130,11 +141,12 @@ class GraniteDoclingConverter:
         for i, fpath in enumerate(files, 1):
             perror(f"Converting {fpath.name} ({i}/{len(files)})...")
             try:
-                doc = self.convert_file(fpath)
-                if doc.export_to_markdown().strip():
-                    docs.append(doc)
-                else:
-                    logger.warning(f"{fpath.name} produced no content")
+                for doc in self.convert_file(fpath):
+                    if isinstance(doc, str):
+                        if doc.strip():
+                            docs.append(doc)
+                    elif doc.export_to_markdown().strip():
+                        docs.append(doc)
             except Exception as e:
                 logger.warning(f"Failed to convert {fpath.name}: {e}")
 
@@ -153,6 +165,19 @@ def _collect_files(path: Path) -> list[Path]:
             if fpath.suffix.lower() in SUPPORTED_EXTENSIONS:
                 files.append(fpath)
     return files
+
+
+def _read_text_file(file_path: Path) -> str:
+    """Read a text file and return its content as a string.
+
+    HTML files have their tags stripped so only text content remains.
+    """
+    import re
+
+    text = file_path.read_text(encoding="utf-8", errors="replace")
+    if file_path.suffix.lower() in {".html", ".htm"}:
+        text = re.sub(r"<[^>]+>", "", text)
+    return text
 
 
 def _import_docling():
