@@ -217,6 +217,6 @@ class RagTransport(OCI):
             )
         return self._connect_and_chat(args, rag_process)
 
-    def wait_for_healthy(self, args: RagArgsType) -> None:
+    def wait_for_healthy(self, args):
         self.imodel.wait_for_healthy(args.model_args)
-        wait_for_healthy(args, partial(is_healthy, model_name=f"{self.imodel.model_name}+rag"))
+        wait_for_healthy(args, partial(is_healthy, model_name=f"{self.imodel.model_name}+rag"), timeout=120)
