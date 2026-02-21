@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from typing import TYPE_CHECKING, Optional
 
 from ramalama.utils.logger import logger
@@ -58,7 +59,108 @@ MIN_VRAM_BYTES = 1073741824  # 1GiB
 podman_machine_accel = False
 
 
-def confirm_no_gpu(name, provider) -> bool:
+def _platform_needs_podman_machine() -> bool:
+    return sys.platform in ("win32", "darwin")
+
+
+def _list_podman_machines(engine: str) -> list[dict]:
+    """List podman machines as parsed JSON. Returns empty list on failure."""
+    cmd = [engine, "machine", "list", "--format", "json"]
+    if sys.platform == "darwin":
+        cmd.append("--all-providers")
+    try:
+        output = run_cmd(cmd, ignore_stderr=True, encoding="utf-8").stdout.strip()
+        machines = json.loads(output)
+        return machines if isinstance(machines, list) else []
+    except (subprocess.CalledProcessError, json.JSONDecodeError, FileNotFoundError) as e:
+        logger.debug(f"Failed to list podman machines: {e}")
+        return []
+
+
+def _find_default_machine(machines: list[dict]) -> dict | None:
+    for m in machines:
+        if m.get("Default", False):
+            return m
+    return machines[0] if machines else None
+
+
+def _start_podman_machine(engine: str, machine_name: str) -> bool:
+    """Attempt to start a podman machine. Returns True on success."""
+    perror(f"Podman machine '{machine_name}' is not running. Starting it now...")
+    try:
+        run_cmd([engine, "machine", "start", machine_name], ignore_stderr=False, stdout=None)
+        perror(f"Podman machine '{machine_name}' started successfully.")
+        return True
+    except subprocess.CalledProcessError as e:
+        perror(f"Failed to start podman machine '{machine_name}': {e}")
+        return False
+
+
+def ensure_podman_machine(engine: SUPPORTED_ENGINES, config: Config | None = None) -> bool:
+    """Ensure a podman machine is running on platforms that require one (Windows, macOS).
+
+    Returns True if podman is usable (machine running or not needed).
+    Returns False if podman cannot be used (no machine, start failed, user declined).
+    """
+    if not _platform_needs_podman_machine():
+        return True
+
+    machines = _list_podman_machines(engine)
+
+    if not machines:
+        perror(
+            "Podman is installed but no machine exists.\n"
+            "Please create one first with:\n"
+            f"  {engine} machine init\n"
+            f"  {engine} machine start"
+        )
+        return False
+
+    default_machine = _find_default_machine(machines)
+    if default_machine is None:
+        return False
+
+    machine_name = default_machine.get("Name", "")
+    is_running = default_machine.get("Running", False)
+
+    if not is_running:
+        if not _start_podman_machine(engine, machine_name):
+            return False
+
+        # Re-fetch machine info after start
+        machines = _list_podman_machines(engine)
+        default_machine = _find_default_machine(machines)
+        if default_machine is None or not default_machine.get("Running", False):
+            perror(f"Podman machine '{machine_name}' failed to reach running state.")
+            return False
+
+    # macOS-specific GPU provider check
+    if sys.platform == "darwin":
+        result = _handle_macos_provider(default_machine, config)
+        if result is not None:
+            return result
+
+    return True
+
+
+def _handle_macos_provider(machine: dict, config: Config | None = None) -> bool | None:
+    """Handle macOS-specific GPU provider checks. Returns None to defer to caller."""
+    global podman_machine_accel
+    provider = machine.get("VMType", "")
+
+    if provider == "applehv":
+        if config is not None and config.user.no_missing_gpu_prompt:
+            return True
+        return _confirm_no_gpu(machine.get("Name", ""), provider)
+
+    if "krun" in provider:
+        podman_machine_accel = True
+        return True
+
+    return None
+
+
+def _confirm_no_gpu(name, provider) -> bool:
     while True:
         user_input = (
             input(
@@ -77,36 +179,17 @@ def confirm_no_gpu(name, provider) -> bool:
         print("Invalid input. Please enter 'yes' or 'no'.")
 
 
-def handle_provider(machine, config: Config | None = None) -> bool | None:
-    global podman_machine_accel
-    name = machine.get("Name")
-    provider = machine.get("VMType")
-    running = machine.get("Running")
-    if running:
-        if provider == "applehv":
-            if config is not None and config.user.no_missing_gpu_prompt:
-                return True
-            else:
-                return confirm_no_gpu(name, provider)
-        if "krun" in provider:
-            podman_machine_accel = True
-            return True
+# Keep old name as alias for backward compatibility
+def confirm_no_gpu(name, provider) -> bool:
+    return _confirm_no_gpu(name, provider)
 
-    return None
+
+def handle_provider(machine, config: Config | None = None) -> bool | None:
+    return _handle_macos_provider(machine, config)
 
 
 def apple_vm(engine: SUPPORTED_ENGINES, config: Config | None = None) -> bool:
-    podman_machine_list = [engine, "machine", "list", "--format", "json", "--all-providers"]
-    try:
-        machines_json = run_cmd(podman_machine_list, ignore_stderr=True, encoding="utf-8").stdout.strip()
-        machines = json.loads(machines_json)
-        for machine in machines:
-            result = handle_provider(machine, config)
-            if result is not None:
-                return result
-    except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
-        logger.warning(f"Failed to list and parse podman machines: {e}")
-    return False
+    return ensure_podman_machine(engine, config)
 
 
 class ContainerEntryPoint(str):

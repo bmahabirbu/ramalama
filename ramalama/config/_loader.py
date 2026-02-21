@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ramalama.cli._arg_normalization import normalize_pull_arg
-from ramalama.utils.common import apple_vm, available
+from ramalama.utils.common import available, ensure_podman_machine
 from ramalama.config.types import SUPPORTED_ENGINES, SUPPORTED_RUNTIMES
 from ramalama.config.layered import LayeredMixin
 from ramalama.utils.log_levels import LogLevel, coerce_log_level
@@ -224,14 +224,21 @@ class Config(LayeredMixin, BaseConfig):
 
     def _finalize_engine(self: "Config"):
         """
-        Finalizes engine selection, with special handling for Podman on macOS.
+        Finalizes engine selection, with special handling for Podman on macOS and Windows.
 
-        If Podman is detected on macOS without a configured machine, it falls back on docker availability.
+        On platforms that require a Podman machine (macOS, Windows), ensures the machine
+        is running -- starting it automatically if needed. Falls back to Docker if Podman
+        cannot be made usable and the user hasn't explicitly configured the engine.
         """
-        if self.engine is not None and os.path.basename(self.engine) == "podman" and sys.platform == "darwin":
-            run_with_podman_engine = apple_vm(self.engine, self)
-            if not run_with_podman_engine and not self.is_set("engine"):
-                self.engine = "docker" if available("docker") else None
+        if self.engine is None or os.path.basename(self.engine) != "podman":
+            return
+
+        if sys.platform not in ("darwin", "win32"):
+            return
+
+        podman_usable = ensure_podman_machine(self.engine, self)
+        if not podman_usable and not self.is_set("engine"):
+            self.engine = "docker" if available("docker") else None
 
 
 def load_file_config() -> dict[str, Any]:
