@@ -1,9 +1,9 @@
 import importlib.metadata
 
-from ramalama.cli.commands import containers, list, pull, rm, serve, stop
+from ramalama.cli.commands import containers, list, pull, rag, rm, serve, stop
 from ramalama.utils.logger import logger
 
-_BUILTINS = [serve, pull, list, rm, stop, containers]
+_BUILTINS = [serve, pull, list, rm, stop, containers, rag]
 
 
 def register_builtins(subparsers):

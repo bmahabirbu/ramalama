@@ -62,6 +62,12 @@ dev = [
     "types-PyYAML",
     "types-jsonschema",
 ]
+rag = [
+    "docling-core",
+    "Pillow",
+    "pypdfium2",
+    "qdrant-client[fastembed]",
+]
 
 [project.urls]
 Homepage = "https://github.com/containers/ramalama"
