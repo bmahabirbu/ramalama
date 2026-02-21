@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Mapping
 
-from ramalama.cli.arg_normalization import normalize_pull_arg
+from ramalama.cli._arg_normalization import normalize_pull_arg
 from ramalama.utils.common import apple_vm, available
 from ramalama.config.types import SUPPORTED_ENGINES, SUPPORTED_RUNTIMES
 from ramalama.config.layered import LayeredMixin

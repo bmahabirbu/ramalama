@@ -10,7 +10,7 @@ from ramalama.utils.common import perror, sanitize_filename, verify_checksum
 from ramalama.utils.endian import EndianMismatchError, get_system_endianness
 from ramalama.utils.logger import logger
 from ramalama.model_inspect.gguf_parser import GGUFInfoParser, GGUFModelInfo
-from ramalama.model_store import go2jinja
+from ramalama.templates import go2jinja
 from ramalama.model_store.constants import DIRECTORY_NAME_BLOBS, DIRECTORY_NAME_REFS, DIRECTORY_NAME_SNAPSHOTS
 from ramalama.model_store.global_store import GlobalModelStore
 from ramalama.model_store.reffile import RefJSONFile, StoreFile, StoreFileType, migrate_reffile_to_refjsonfile
@@ -20,7 +20,7 @@ from ramalama.model_store.snapshot_file import (
     SnapshotFileType,
     validate_snapshot_files,
 )
-from ramalama.model_store.template_conversion import (
+from ramalama.templates.conversion import (
     TemplateConversionError,
     convert_go_to_jinja,
     ensure_jinja_openai_compatibility,

@@ -20,7 +20,6 @@ class CommandSpecV1:
             option.value = d.get("value", None)
             option.required = d.get("required", True)
             option.condition = d.get("if", None)
-
             return option
 
     class Engine:
@@ -31,14 +30,12 @@ class CommandSpecV1:
         @staticmethod
         def from_dict(d: dict) -> "CommandSpecV1.Engine":
             engine = CommandSpecV1.Engine()
-
             engine.name = d["name"]
             engine.binary = d["binary"]
             engine.options = []
             for option in d["options"]:
                 opt = CommandSpecV1.Option.from_dict(option)
                 engine.options.append(opt)
-
             return engine
 
     class Command:
@@ -60,5 +57,4 @@ class CommandSpecV1:
         for cmd in d.get("commands", []):
             if cmd["name"] == command:
                 return CommandSpecV1(CommandSpecV1.Command.from_dict(cmd))
-
         return None

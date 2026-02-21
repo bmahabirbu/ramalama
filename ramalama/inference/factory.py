@@ -1,3 +1,5 @@
+"""Builds runtime commands from YAML inference specs."""
+
 import argparse
 import ast
 import json
@@ -9,7 +11,7 @@ import jinja2
 import jsonschema
 import yaml
 
-from ramalama.command import context, error, schema
+from ramalama.inference import context, error, schema
 from ramalama.utils.common import ContainerEntryPoint
 from ramalama.config import get_inference_schema_files, get_inference_spec_files
 
@@ -55,7 +57,6 @@ class CommandFactory:
         engine = spec.command.engine
 
         cmd = []
-        # FIXME: binary should be a string array to work with nocontainer
         binary = CommandFactory.eval_stmt(engine.binary, ctx)
         if is_truthy(binary):
             cmd += shlex.split(binary)
@@ -95,8 +96,8 @@ class CommandFactory:
         })
 
     @staticmethod
-    def validate_spec(spec_data: dict, schema: dict):
-        jsonschema.validate(instance=spec_data, schema=schema)
+    def validate_spec(spec_data: dict, schema_dict: dict):
+        jsonschema.validate(instance=spec_data, schema=schema_dict)
 
     @staticmethod
     def load_file(path: Path) -> dict:

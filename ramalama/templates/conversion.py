@@ -1,9 +1,11 @@
+"""Chat template format conversion: Go-to-Jinja and OpenAI compatibility wrapping."""
+
 import re
 from functools import lru_cache
 
 from jinja2 import Environment, meta
 
-from ramalama.model_store import go2jinja
+from ramalama.templates import go2jinja
 
 
 class TemplateConversionError(Exception):
@@ -28,13 +30,7 @@ def _role_patterns() -> tuple[re.Pattern[str], re.Pattern[str]]:
 
 
 def wrap_template_with_messages_loop(template: str) -> str:
-    """
-    Wrap a flat-variable Jinja template with OpenAI messages loop.
-
-    Input: {% if system %}...{% endif %}{% if prompt %}...{% endif %}
-    Output: {% for message in messages %}{% if message.role == 'system' %}...
-        {% if message.role == 'user' %}...{% endfor %}
-    """
+    """Wrap a flat-variable Jinja template with OpenAI messages loop."""
 
     def directive_substitution(match: re.Match) -> str:
         directive, var = match.groups()
@@ -60,7 +56,7 @@ def wrap_template_with_messages_loop(template: str) -> str:
 
 
 def get_jinja_variables(template: str) -> set[str]:
-    """Returns all variables associated with a jinja template except those explicitly set in the template"""
+    """Returns all variables associated with a jinja template except those explicitly set in the template."""
     env = Environment()
     ast = env.parse(template)
     return meta.find_undeclared_variables(ast)
@@ -73,7 +69,6 @@ def is_openai_jinja(template: str):
 def ensure_jinja_openai_compatibility(template: str) -> str:
     if "messages" not in get_jinja_variables(template):
         template = wrap_template_with_messages_loop(template)
-
     return template
 
 

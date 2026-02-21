@@ -1,3 +1,5 @@
+"""Podman Quadlet unit file generator."""
+
 import os
 import shlex
 from typing import Optional, Tuple
@@ -23,8 +25,6 @@ class Quadlet:
             chat_template_paths if chat_template_paths is not None else ("", "")
         )
         self.src_mmproj_path, self.dest_mmproj_path = mmproj_path if mmproj_path is not None else ("", "")
-
-        # Store all model parts for multi-part models
         self.model_parts = model_parts if model_parts is not None else [(self.src_model_path, self.dest_model_path)]
 
         if self.src_model_path.startswith("oci://"):
@@ -65,7 +65,6 @@ class Quadlet:
 
         cmd_args = self.exec_args
         if len(cmd_args) > 0 and isinstance(cmd_args[0], ContainerEntryPoint):
-            # Ignore entrypoint
             cmd_args = cmd_args[1:]
 
         exec_cmd = shlex.join(cmd_args)
@@ -91,7 +90,6 @@ class Quadlet:
         volume_files = self._gen_model_volume(quadlet_file)
         files.extend(volume_files)
 
-        # Start by default on boot
         quadlet_file.add("Install", "WantedBy", "multi-user.target default.target")
         files.append(quadlet_file)
 
@@ -134,37 +132,27 @@ class Quadlet:
 
     def _gen_model_volume(self, quadlet_file: UnitFile):
         files: list[UnitFile] = []
-
-        # Check if any model part exists as a file (non-OCI model from store)
         local_model_parts = [part for part in self.model_parts if os.path.exists(part[0])]
-
         if local_model_parts:
-            # Generate Mount= entries for each model part
             for src_path, dest_path in local_model_parts:
                 quadlet_file.add("Container", "Mount", f"type=bind,src={src_path},target={dest_path},ro,Z")
             return files
 
-        # OCI model handling
         volume_file_name = f"{self.name}.volume"
         print(f"Generating quadlet file: {volume_file_name} ")
-
         volume_file = UnitFile(volume_file_name)
         volume_file.add("Volume", "Driver", "image")
         volume_file.add("Volume", "Image", f"{self.name}.image")
         files.append(volume_file)
-
         files.append(self._gen_image(self.name, self.ai_image))
 
         if self.artifact:
             quadlet_file.add(
-                "Container",
-                "Mount",
-                f"type=artifact,source={self.ai_image},destination={MNT_DIR}",
+                "Container", "Mount", f"type=artifact,source={self.ai_image},destination={MNT_DIR}",
             )
         else:
             quadlet_file.add(
-                "Container",
-                "Mount",
+                "Container", "Mount",
                 f"type=image,source={self.ai_image},destination={MNT_DIR},subpath=/models,readwrite=false",
             )
         return files
@@ -178,12 +166,9 @@ class Quadlet:
 def kube(name, description) -> UnitFile:
     file_name = f"{name}.kube"
     print(f"Generating quadlet file: {file_name}")
-
     file = UnitFile(file_name)
     file.add("Unit", "Description", description)
     file.add("Unit", "After", "local-fs.target")
     file.add("Kube", "Yaml", f"{name}.yaml")
-    # Start by default on boot
     file.add("Install", "WantedBy", "multi-user.target default.target")
-
     return file

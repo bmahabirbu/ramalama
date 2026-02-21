@@ -3,7 +3,7 @@ from collections.abc import Callable
 from typing import TypeAlias
 from urllib.parse import urlparse
 
-from ramalama.cli.arg_types import StoreArgType
+from ramalama.types import StoreArgType
 from ramalama.utils.common import rm_until_substring
 from ramalama.config import get_config
 from ramalama.utils.path_utils import file_uri_to_path

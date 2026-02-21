@@ -1,3 +1,5 @@
+"""Kubernetes Deployment YAML generator."""
+
 import os
 import platform
 from typing import Optional, Tuple
@@ -138,7 +140,6 @@ class Kube:
     def __gen_ports(self):
         if not hasattr(self.args, "port"):
             return ""
-
         p = self.args.port.split(":", 2)
         ports = f"""\
         ports:
@@ -146,24 +147,19 @@ class Kube:
         if len(p) > 1:
             ports += f"""
           hostPort: {p[1]}"""
-
         return ports
 
     @staticmethod
     def __gen_env_vars():
         env_vars = get_accel_env_vars()
-
         if not env_vars:
             return ""
-
         env_spec = """\
         env:"""
-
         for k, v in env_vars.items():
             env_spec += f"""
         - name: {k}
           value: \"{v}\""""
-
         return env_spec
 
     def generate(self) -> PlainFile:
@@ -214,7 +210,6 @@ spec:
 def genfile(name, content) -> PlainFile:
     file_name = f"{name}.yaml"
     print(f"Generating Kubernetes YAML file: {file_name}")
-
     file = PlainFile(file_name)
     file.content = content
     return file

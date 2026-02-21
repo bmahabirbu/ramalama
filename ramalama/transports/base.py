@@ -19,15 +19,15 @@ from ramalama.utils.common import (
     populate_volume_from_image,
     set_accel_env_vars,
 )
-from ramalama.runtime.compose import Compose
+from ramalama.runtime.generators.compose import Compose
 from ramalama.config import get_config
 from ramalama.runtime.engine import Engine, dry_run, is_healthy, wait_for_healthy
-from ramalama.runtime.kube import Kube
+from ramalama.runtime.generators.kube import Kube
 from ramalama.utils.logger import logger
 from ramalama.model_store.global_store import GlobalModelStore
 from ramalama.model_store.store import ModelStore
 from ramalama.utils.path_utils import get_container_mount_path
-from ramalama.runtime.quadlet import Quadlet
+from ramalama.runtime.generators.quadlet import Quadlet
 
 MODEL_TYPES = ["file", "https", "http", "oci", "huggingface", "hf", "modelscope", "ms", "ollama", "rlcr"]
 

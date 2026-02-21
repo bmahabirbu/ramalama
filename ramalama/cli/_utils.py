@@ -3,7 +3,7 @@ import shlex
 from functools import lru_cache
 from urllib.parse import urlparse
 
-from ramalama.cli.arg_normalization import normalize_pull_arg
+from ramalama.cli._arg_normalization import normalize_pull_arg
 from ramalama.config import get_config
 from ramalama.utils.log_levels import LogLevel
 from ramalama.utils.logger import configure_logger, logger
@@ -200,6 +200,6 @@ def post_parse_setup(args):
 
 
 def assemble_command_lazy(cli_args):
-    from ramalama.command.factory import assemble_command
+    from ramalama.inference.factory import assemble_command
 
     return assemble_command(cli_args)

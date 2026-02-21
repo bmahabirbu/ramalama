@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import TypedDict
 
 import ramalama.transports.annotations as annotations
-from ramalama.cli.arg_types import EngineArgType
+from ramalama.types import EngineArgType
 from ramalama.utils.common import engine_version, run_cmd
 from ramalama.utils.logger import logger
 

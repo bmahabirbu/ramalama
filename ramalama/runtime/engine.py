@@ -9,7 +9,7 @@ from http.client import HTTPConnection, HTTPException
 from typing import Any
 
 import ramalama.utils.common
-from ramalama.cli.arg_types import BaseEngineArgsType
+from ramalama.types import BaseEngineArgsType
 from ramalama.utils.common import exec_cmd, perror, run_cmd
 from ramalama.utils.compat import NamedTemporaryFile
 from ramalama.utils.logger import logger

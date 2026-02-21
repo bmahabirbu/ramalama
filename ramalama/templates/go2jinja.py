@@ -28,38 +28,30 @@ class Node:
     start: int
     end: int
     content: str
-
     type: NodeType | None
-
     prev: Optional["Node"]
     next: Optional["Node"]
     parent: Optional["Node"]
-
     open_scope_node: Optional["Node"] = None
     end_scope_node: Optional["Node"] = None
     children: list["Node"] = field(default_factory=lambda: [])
-
     artificial: bool = False
 
 
 class FunctionType(Enum):
     PLAIN = "plain"
-
     AND = "and"
     OR = "or"
     NOT = "not"
-
     EQUALS = "eq"
     NEQUALS = "ne"
     LESSER = "lt"
     LESSEREQUALS = "le"
     GREATER = "gt"
     GREATEREQUALS = "ge"
-
     LEN = "len"
     SLICE = "slice"
     INDEX = "index"
-
     PRINTF = "printf"
 
 
@@ -84,9 +76,7 @@ FUNCTION_MAPPING = {
 class FunctionNode:
     content: str
     type: FunctionType
-
     operands: list["FunctionNode"] = field(default_factory=lambda: [])
-
     brackets: bool = False
 
     def to_jinja(self) -> str:
@@ -96,12 +86,8 @@ class FunctionNode:
             prefix = "("
             postfix = ")"
         if self.type in [
-            FunctionType.EQUALS,
-            FunctionType.NEQUALS,
-            FunctionType.GREATER,
-            FunctionType.GREATEREQUALS,
-            FunctionType.LESSER,
-            FunctionType.LESSEREQUALS,
+            FunctionType.EQUALS, FunctionType.NEQUALS, FunctionType.GREATER,
+            FunctionType.GREATEREQUALS, FunctionType.LESSER, FunctionType.LESSEREQUALS,
         ]:
             return (
                 prefix
@@ -182,8 +168,6 @@ GO_KEYWORDS: Dict[NodeType, re.Pattern] = {
 
 
 def detect_node_type(stmt: str) -> Optional[NodeType]:
-
-    # from most complex to least
     ordered_regex_list = [
         (NodeType.RANGE, GO_KEYWORDS[NodeType.RANGE]),
         (NodeType.IF, GO_KEYWORDS[NodeType.IF]),
@@ -195,7 +179,6 @@ def detect_node_type(stmt: str) -> Optional[NodeType]:
         (NodeType.ASSIGNMENT, GO_KEYWORDS[NodeType.ASSIGNMENT]),
         (NodeType.STATEMENT, GO_KEYWORDS[NodeType.STATEMENT]),
     ]
-
     for regex in ordered_regex_list:
         ntype, reg = regex
         if reg.match(stmt) is not None:
@@ -205,37 +188,21 @@ def detect_node_type(stmt: str) -> Optional[NodeType]:
 
 def parse_go_template(content: str) -> list[Node]:
     root_nodes: list[Node] = []
-
     prev_expr_node: Node | None = None
     current_scope_nodes: list[Node] = []
     start_pos = content.find(GO_SYMBOL_OPEN_BRACKETS)
     end_pos = 0
     while start_pos != -1:
-
         if end_pos == 0 and start_pos != 0:
             content_node = Node(
-                end_pos,
-                start_pos,
-                content[end_pos:start_pos],
-                NodeType.CONTENT,
-                prev=None,
-                next=None,
-                parent=None,
-                children=[],
-                artificial=False,
+                end_pos, start_pos, content[end_pos:start_pos], NodeType.CONTENT,
+                prev=None, next=None, parent=None, children=[], artificial=False,
             )
             root_nodes.append(content_node)
         elif start_pos - end_pos > 0:
             content_node = Node(
-                end_pos,
-                start_pos,
-                content[end_pos:start_pos],
-                NodeType.CONTENT,
-                prev=None,
-                next=None,
-                parent=None,
-                children=[],
-                artificial=False,
+                end_pos, start_pos, content[end_pos:start_pos], NodeType.CONTENT,
+                prev=None, next=None, parent=None, children=[], artificial=False,
             )
             current_scope_node = None if not current_scope_nodes else current_scope_nodes[-1]
             if current_scope_node is not None:
@@ -252,15 +219,8 @@ def parse_go_template(content: str) -> list[Node]:
         node_type = detect_node_type(stmt)
 
         expr_node = Node(
-            start_pos,
-            end_pos,
-            content[start_pos:end_pos],
-            node_type,
-            prev=prev_expr_node,
-            next=None,
-            parent=None,
-            children=[],
-            artificial=False,
+            start_pos, end_pos, content[start_pos:end_pos], node_type,
+            prev=prev_expr_node, next=None, parent=None, children=[], artificial=False,
         )
         if prev_expr_node is not None:
             prev_expr_node.next = expr_node
@@ -297,20 +257,12 @@ def parse_go_template(content: str) -> list[Node]:
             expr_node.parent.children.append(expr_node)
 
         prev_expr_node = expr_node
-
         start_pos = content.find(GO_SYMBOL_OPEN_BRACKETS, end_pos)
 
     if end_pos < len(content):
         content_node = Node(
-            end_pos,
-            len(content) + 1,
-            content[end_pos : len(content) + 1],
-            NodeType.CONTENT,
-            prev=None,
-            next=None,
-            parent=None,
-            children=[],
-            artificial=False,
+            end_pos, len(content) + 1, content[end_pos: len(content) + 1], NodeType.CONTENT,
+            prev=None, next=None, parent=None, children=[], artificial=False,
         )
         root_nodes.append(content_node)
 
@@ -352,14 +304,12 @@ def go_to_jinja(content: str) -> str:
                 start, end = m.span()
                 if start == 0 and end == (len(pipeline)):
                     return transform_go_var_to_jinja(pipeline)
-
             reg = re.compile(R"{}".format(f"{REGEX_LOCAL_VARIABLE}"))
             m = reg.match(pipeline)
             if m is not None:
                 start, end = m.span()
                 if start == 0 and end == (len(pipeline)):
                     return transform_go_local_var_to_jinja(pipeline)
-
             return pipeline
 
         def parse_functions(pipeline: str) -> FunctionNode:
@@ -373,7 +323,7 @@ def go_to_jinja(content: str) -> str:
                         longest_match = ft
 
             if longest_match is not None:
-                func_content = pipeline[len(longest_match.value) :].strip()
+                func_content = pipeline[len(longest_match.value):].strip()
                 node = FunctionNode(func_content, longest_match)
 
                 quotes_open = False
@@ -391,7 +341,7 @@ def go_to_jinja(content: str) -> str:
                         open_brackets -= 1
                         if open_brackets == 0:
                             end = i
-                            groups.append((func_content[start + 1 : end], True))
+                            groups.append((func_content[start + 1: end], True))
                     elif c == '"' and prev_c != "\\":
                         quotes_open = not quotes_open
                     elif c == " " and not quotes_open and open_brackets == 0 and prev_c != ")":
@@ -422,9 +372,9 @@ def go_to_jinja(content: str) -> str:
         if node.type == NodeType.STATEMENT:
             m = GO_KEYWORDS[NodeType.STATEMENT].match(node.content)
             if m is not None:
-                content = transform_go_var_to_jinja(node.content[m.start(1) : m.end(1)])
+                content = transform_go_var_to_jinja(node.content[m.start(1): m.end(1)])
                 content = transform_go_local_var_to_jinja(content)
-                content = node.content[: m.start(1)] + content + node.content[m.end(1) :]
+                content = node.content[: m.start(1)] + content + node.content[m.end(1):]
                 return content.replace(GO_SYMBOL_OPEN_BRACKETS, JINJA_SYMBOL_STMT_OPEN_BRACKETS).replace(
                     GO_SYMBOL_CLOSE_BRACKETS, JINJA_SYMBOL_STMT_CLOSE_BRACKETS
                 )
@@ -461,22 +411,20 @@ def go_to_jinja(content: str) -> str:
             m = GO_KEYWORDS[NodeType.END].match(node.content)
             if m is None:
                 return ""
-
             if node.open_scope_node and node.open_scope_node.type in [NodeType.IF, NodeType.ELIF, NodeType.ELSE]:
                 return (
                     node.content[: m.start(1)].replace(GO_SYMBOL_OPEN_BRACKETS, JINJA_SYMBOL_OPEN_BRACKETS)
                     + "endif"
-                    + node.content[m.end(1) :].replace(GO_SYMBOL_CLOSE_BRACKETS, JINJA_SYMBOL_CLOSE_BRACKETS)
+                    + node.content[m.end(1):].replace(GO_SYMBOL_CLOSE_BRACKETS, JINJA_SYMBOL_CLOSE_BRACKETS)
                 )
             elif node.open_scope_node and node.open_scope_node.type == NodeType.RANGE:
                 loop_vars.pop()
                 if loop_index_vars:
                     loop_index_vars.pop()
-
                 return (
                     node.content[: m.start(1)].replace(GO_SYMBOL_OPEN_BRACKETS, JINJA_SYMBOL_OPEN_BRACKETS)
                     + "endfor"
-                    + node.content[m.end(1) :].replace(GO_SYMBOL_CLOSE_BRACKETS, JINJA_SYMBOL_CLOSE_BRACKETS)
+                    + node.content[m.end(1):].replace(GO_SYMBOL_CLOSE_BRACKETS, JINJA_SYMBOL_CLOSE_BRACKETS)
                 )
         elif node.type == NodeType.ASSIGNMENT:
             m = GO_KEYWORDS[NodeType.ASSIGNMENT].match(node.content)
@@ -527,45 +475,20 @@ def go_to_jinja(content: str) -> str:
     return nodes_to_jinja_str(parse_go_template(content))
 
 
-def tree_structure(nodes: list[Node], level: int) -> str:
-    res = ""
-    for node in nodes:
-        parent_type = "--" if node.parent is None else node.parent.type
-        res += level * "\t" + f"{node.type}: {node.start},{node.end} - " f"{parent_type} - {node.content}\n"
-        res += tree_structure(node.children, level + 1)
-
-    return res
-
-
-def tree_content(nodes: list[Node], level: int) -> str:
-    res = ""
-    for node in nodes:
-        res += node.content
-        res += tree_content(node.children, level + 1)
-    return res
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="go2jinja",
         description="Simple Tool for converting Go Templates to Jinja Templates",
     )
-
     parser.add_argument(
-        "--go-template",
-        dest="template",
-        required=True,
+        "--go-template", dest="template", required=True,
         help="Path to the file containing the Go Template to convert to Jinja",
     )
     parser.add_argument(
-        "--output",
-        dest="output",
-        default="",
+        "--output", dest="output", default="",
         help="Output file path for the converted Jinja Template. If empty, prints to stdout.",
     )
-
     args = parser.parse_args()
-
     jinja = ""
     with open(args.template, "r") as input:
         jinja = go_to_jinja(input.read())
