@@ -18,24 +18,27 @@ from ramalama.utils.common import perror, set_accel_env_vars
 from ramalama.utils.logger import logger
 
 GRANITE_DOCLING_MODEL = "hf://ibm-granite/granite-docling-258M-GGUF"
+QWEN3_EMBEDDING_MODEL = "hf://Qwen/Qwen3-Embedding-8B-GGUF"
 
 
 def run_rag_pipeline(args):
     """Execute the full RAG pipeline.
 
     1. Pull/verify the Granite Docling GGUF model.
-    2. Start a temporary llama.cpp server for document conversion.
-    3. Send each document image through the VLM to get structured text.
-    4. Chunk the text and embed into a Qdrant vector database.
-    5. Package the Qdrant database as a container image.
+    2. Pull/verify the Qwen3 Embedding GGUF model.
+    3. Start temporary llama.cpp servers for document conversion and embeddings.
+    4. Send each document image through the VLM to get structured text.
+    5. Chunk the text and embed via llama.cpp into a Qdrant vector database.
+    6. Package the Qdrant database as a container image.
     """
     from ramalama.rag.chunker import chunk_texts
     from ramalama.rag.converter import GraniteDoclingConverter
-    from ramalama.rag.vectordb import store_in_qdrant
+    from ramalama.rag.vectordb import LlamaCppEmbedder, store_in_qdrant
 
     source_path = Path(args.DOCUMENTS)
     image_name = args.IMAGE_NAME
-    model_name = getattr(args, "docling_model", GRANITE_DOCLING_MODEL)
+    docling_model = getattr(args, "docling_model", GRANITE_DOCLING_MODEL)
+    embedding_model = getattr(args, "embedding_model", QWEN3_EMBEDDING_MODEL)
 
     if not source_path.exists():
         raise FileNotFoundError(f"Document path not found: {source_path}")
@@ -43,24 +46,39 @@ def run_rag_pipeline(args):
     if args.engine is None:
         raise ValueError("A container engine (podman or docker) is required to build the RAG image.")
 
-    serve_args = _build_serve_args(args, model_name)
-    port = int(serve_args.port)
+    docling_serve_args = _build_serve_args(args, docling_model)
+    docling_port = int(docling_serve_args.port)
+
+    embed_serve_args = _build_embed_serve_args(args, embedding_model, exclude_ports=[docling_serve_args.port])
+    embed_port = int(embed_serve_args.port)
 
     perror("Pulling Granite Docling model...")
-    model = New(model_name, serve_args)
-    model.ensure_model_exists(serve_args)
+    docling_transport = New(docling_model, docling_serve_args)
+    docling_transport.ensure_model_exists(docling_serve_args)
+
+    perror("Pulling Qwen3 Embedding model...")
+    embed_transport = New(embedding_model, embed_serve_args)
+    embed_transport.ensure_model_exists(embed_serve_args)
 
     set_accel_env_vars()
-    cmd = assemble_command_lazy(serve_args)
+
+    docling_cmd = assemble_command_lazy(docling_serve_args)
+    embed_cmd = assemble_command_lazy(embed_serve_args)
 
     perror("Starting Granite Docling inference server...")
-    proc = model.serve_nonblocking(serve_args, cmd)
+    docling_proc = docling_transport.serve_nonblocking(docling_serve_args, docling_cmd)
 
+    embed_proc = None
     try:
-        _wait_for_server("localhost", port)
+        _wait_for_server("localhost", docling_port)
         perror("Granite Docling server is ready.")
 
-        converter = GraniteDoclingConverter(api_url=f"http://localhost:{port}")
+        perror("Starting Qwen3 Embedding server...")
+        embed_proc = embed_transport.serve_nonblocking(embed_serve_args, embed_cmd)
+        _wait_for_server("localhost", embed_port)
+        perror("Qwen3 Embedding server is ready.")
+
+        converter = GraniteDoclingConverter(api_url=f"http://localhost:{docling_port}")
         texts = converter.convert_directory(source_path)
 
         if not texts:
@@ -70,16 +88,19 @@ def run_rag_pipeline(args):
         chunks, ids = chunk_texts(texts)
         perror(f"Created {len(chunks)} chunks from {len(texts)} document(s)")
 
+        embedder = LlamaCppEmbedder(api_url=f"http://localhost:{embed_port}")
+
         with tempfile.TemporaryDirectory() as tmpdir:
             qdrant_dir = os.path.join(tmpdir, "qdrant_data")
-            store_in_qdrant(chunks, ids, qdrant_dir)
+            store_in_qdrant(chunks, ids, qdrant_dir, embedder)
 
             perror(f"Building container image '{image_name}'...")
             _build_rag_image(args, qdrant_dir, image_name)
 
         perror(f"RAG image '{image_name}' created successfully.")
     finally:
-        _stop_server(proc, serve_args)
+        _stop_server(embed_proc, embed_serve_args)
+        _stop_server(docling_proc, docling_serve_args)
 
 
 def _build_serve_args(args, model_name: str) -> argparse.Namespace:
@@ -90,7 +111,6 @@ def _build_serve_args(args, model_name: str) -> argparse.Namespace:
         MODEL=model_name,
         subcommand="serve",
         runtime="llama.cpp",
-        # Global options carried from the user's invocation
         container=args.container,
         engine=args.engine,
         store=args.store,
@@ -98,7 +118,6 @@ def _build_serve_args(args, model_name: str) -> argparse.Namespace:
         debug=args.debug,
         quiet=True,
         noout=True,
-        # Container / engine options
         image=getattr(args, "image", default_image()),
         pull=getattr(args, "pull", config.pull),
         network=None,
@@ -112,7 +131,6 @@ def _build_serve_args(args, model_name: str) -> argparse.Namespace:
         detach=True,
         name=None,
         dri="on",
-        # Serve / inference options
         host="localhost",
         port=None,
         context=8192,
@@ -131,13 +149,69 @@ def _build_serve_args(args, model_name: str) -> argparse.Namespace:
         generate=None,
         logfile=None,
         gguf=None,
-        # Pull-related options needed by the transport layer
         authfile=None,
         tlsverify=True,
         verify=config.verify,
     )
 
     serve_args.port = compute_serving_port(serve_args)
+    return serve_args
+
+
+def _build_embed_serve_args(
+    args, model_name: str, exclude_ports: list[str] | None = None
+) -> argparse.Namespace:
+    """Construct serve args for the embedding model with ``--embedding --pooling last``."""
+    config = get_config()
+
+    serve_args = argparse.Namespace(
+        MODEL=model_name,
+        subcommand="serve",
+        runtime="llama.cpp",
+        container=args.container,
+        engine=args.engine,
+        store=args.store,
+        dryrun=args.dryrun,
+        debug=args.debug,
+        quiet=True,
+        noout=True,
+        image=getattr(args, "image", default_image()),
+        pull=getattr(args, "pull", config.pull),
+        network=None,
+        oci_runtime=None,
+        selinux=False,
+        nocapdrop=False,
+        device=None,
+        podman_keep_groups=False,
+        privileged=False,
+        env=[],
+        detach=True,
+        name=None,
+        dri="on",
+        host="localhost",
+        port=None,
+        context=8192,
+        cache_reuse=256,
+        ngl=getattr(args, "ngl", config.ngl),
+        threads=getattr(args, "threads", default_threads()),
+        temp=0.0,
+        thinking=False,
+        max_tokens=0,
+        seed=None,
+        webui="off",
+        model_draft=None,
+        runtime_args=["--embedding", "--pooling", "last"],
+        router_mode=False,
+        models_max=4,
+        generate=None,
+        logfile=None,
+        gguf=None,
+        authfile=None,
+        tlsverify=True,
+        verify=config.verify,
+    )
+
+    serve_args.port = compute_serving_port(serve_args, exclude=exclude_ports)
     return serve_args
 
 
@@ -157,11 +231,11 @@ def _wait_for_server(host: str, port: int, timeout: int = 180):
             pass
         time.sleep(1)
 
-    raise TimeoutError(f"Granite Docling server at {host}:{port} did not become ready within {timeout}s")
+    raise TimeoutError(f"Server at {host}:{port} did not become ready within {timeout}s")
 
 
 def _stop_server(proc: subprocess.Popen | None, serve_args: argparse.Namespace):
-    """Shut down the temporary llama.cpp server."""
+    """Shut down a temporary llama.cpp server."""
     if serve_args.container and getattr(serve_args, "name", None):
         try:
             from ramalama.runtime.engine import stop_container

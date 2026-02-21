@@ -66,7 +66,7 @@ rag = [
     "docling-core",
     "Pillow",
     "pypdfium2",
-    "qdrant-client[fastembed]",
+    "qdrant-client",
 ]
 
 [project.urls]
