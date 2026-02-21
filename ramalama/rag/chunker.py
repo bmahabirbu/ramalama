@@ -1,43 +1,53 @@
-"""Text chunking for the RAG pipeline."""
+"""Section-aware document chunking via DoclingDocument's layout tree.
+
+Groups content under its heading so each chunk is a coherent section
+(heading + paragraphs + tables + captions).  No extra dependencies
+beyond docling-core.
+"""
 
 import hashlib
 import uuid
 
+from docling_core.types.doc.document import SectionHeaderItem, TitleItem
 
-def chunk_texts(texts: list[str], max_tokens: int = 128, overlap: int = 32) -> tuple[list[str], list[int]]:
-    """Split a list of document texts into overlapping chunks.
+
+def chunk_documents(docs: list) -> tuple[list[str], list[int]]:
+    """Chunk ``DoclingDocument`` objects by section.
+
+    Content is accumulated under each heading and flushed as a single
+    chunk when the next heading (at the same or higher level) appears.
 
     Returns ``(chunks, ids)`` where *ids* are deterministic ``int64`` hashes.
     """
     chunks: list[str] = []
     ids: list[int] = []
 
-    for text in texts:
-        for chunk in _split_text(text, max_tokens=max_tokens, overlap=overlap):
-            chunks.append(chunk)
-            ids.append(_text_hash(chunk))
+    for doc in docs:
+        parts: list[str] = []
+
+        for item, _level in doc.iterate_items():
+            if isinstance(item, (TitleItem, SectionHeaderItem)):
+                _flush(parts, chunks, ids)
+                parts = [item.text.strip()] if item.text else []
+                continue
+
+            if hasattr(item, "text") and item.text:
+                text = item.text.strip()
+                if text:
+                    parts.append(text)
+
+        _flush(parts, chunks, ids)
 
     return chunks, ids
 
 
-def _split_text(text: str, max_tokens: int = 128, overlap: int = 32) -> list[str]:
-    """Split *text* into overlapping chunks using whitespace-based tokenisation."""
-    words = text.split()
-    if not words:
-        return []
-
-    result: list[str] = []
-    start = 0
-    while start < len(words):
-        end = min(start + max_tokens, len(words))
-        chunk = " ".join(words[start:end])
-        if chunk.strip():
-            result.append(chunk)
-        if end >= len(words):
-            break
-        start += max_tokens - overlap
-
-    return result
+def _flush(parts: list[str], chunks: list[str], ids: list[int]):
+    """Join accumulated section parts into a chunk and append it."""
+    combined = "\n".join(parts).strip()
+    if combined:
+        chunks.append(combined)
+        ids.append(_text_hash(combined))
+    parts.clear()
 
 
 def _text_hash(text: str) -> int:

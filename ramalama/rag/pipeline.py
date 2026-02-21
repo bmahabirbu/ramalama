@@ -17,8 +17,8 @@ from ramalama.runtime.engine import BuildEngine
 from ramalama.utils.common import perror, set_accel_env_vars
 from ramalama.utils.logger import logger
 
-GRANITE_DOCLING_MODEL = "hf://ibm-granite/granite-docling-258M-GGUF"
-QWEN3_EMBEDDING_MODEL = "hf://Qwen/Qwen3-Embedding-8B-GGUF"
+IMAGE_PARSER_MODEL = "hf://ibm-granite/granite-docling-258M-GGUF"
+EMBEDDING_MODEL = "hf://Qwen/Qwen3-Embedding-0.6B-GGUF"
 
 
 def run_rag_pipeline(args):
@@ -31,14 +31,14 @@ def run_rag_pipeline(args):
     5. Chunk the text and embed via llama.cpp into a Qdrant vector database.
     6. Package the Qdrant database as a container image.
     """
-    from ramalama.rag.chunker import chunk_texts
+    from ramalama.rag.chunker import chunk_documents
     from ramalama.rag.converter import GraniteDoclingConverter
     from ramalama.rag.vectordb import LlamaCppEmbedder, store_in_qdrant
 
     source_path = Path(args.DOCUMENTS)
     image_name = args.IMAGE_NAME
-    docling_model = getattr(args, "docling_model", GRANITE_DOCLING_MODEL)
-    embedding_model = getattr(args, "embedding_model", QWEN3_EMBEDDING_MODEL)
+    docling_model = getattr(args, "docling_model", IMAGE_PARSER_MODEL)
+    embedding_model = getattr(args, "embedding_model", EMBEDDING_MODEL)
 
     if not source_path.exists():
         raise FileNotFoundError(f"Document path not found: {source_path}")
@@ -79,14 +79,14 @@ def run_rag_pipeline(args):
         perror("Qwen3 Embedding server is ready.")
 
         converter = GraniteDoclingConverter(api_url=f"http://localhost:{docling_port}")
-        texts = converter.convert_directory(source_path)
+        docs = converter.convert_directory(source_path)
 
-        if not texts:
+        if not docs:
             raise ValueError("No documents were successfully converted")
 
-        perror("Chunking and embedding documents...")
-        chunks, ids = chunk_texts(texts)
-        perror(f"Created {len(chunks)} chunks from {len(texts)} document(s)")
+        perror("Chunking documents ...")
+        chunks, ids = chunk_documents(docs)
+        perror(f"Created {len(chunks)} chunks from {len(docs)} document(s)")
 
         embedder = LlamaCppEmbedder(api_url=f"http://localhost:{embed_port}")
 

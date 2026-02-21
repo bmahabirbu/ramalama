@@ -56,14 +56,14 @@ class GraniteDoclingConverter:
 
         return result["choices"][0]["message"]["content"]
 
-    def convert_file(self, file_path: Path, name: str | None = None) -> str:
-        """Convert a single file (PDF or image) and return markdown text."""
+    def convert_file(self, file_path: Path, name: str | None = None):
+        """Convert a single file (PDF or image) and return a ``DoclingDocument``."""
         if file_path.suffix.lower() in PDF_EXTENSIONS:
             return self._convert_pdf(file_path, name)
         return self._convert_image(file_path, name)
 
-    def _convert_image(self, image_path: Path, name: str | None = None) -> str:
-        """Convert a single image file via DocTags and return markdown."""
+    def _convert_image(self, image_path: Path, name: str | None = None):
+        """Convert a single image file via DocTags and return a ``DoclingDocument``."""
         DoclingDocument, DocTagsDocument = _import_docling()
         Image = _import_pillow()
 
@@ -77,12 +77,11 @@ class GraniteDoclingConverter:
 
         doctags_doc = DocTagsDocument.from_doctags_and_image_pairs([doctags], [pil_image])
         doc = DoclingDocument.load_from_doctags(doctags_doc, document_name=name)
-        md = doc.export_to_markdown()
-        logger.debug(f"Markdown for {image_path.name} ({len(md)} chars)")
-        return md
+        logger.debug(f"DoclingDocument for {image_path.name} ({len(list(doc.iterate_items()))} items)")
+        return doc
 
-    def _convert_pdf(self, pdf_path: Path, name: str | None = None) -> str:
-        """Render each page of a PDF to an image, send to VLM, return markdown."""
+    def _convert_pdf(self, pdf_path: Path, name: str | None = None):
+        """Render each page of a PDF to an image, send to VLM, return a ``DoclingDocument``."""
         DoclingDocument, DocTagsDocument = _import_docling()
 
         try:
@@ -116,31 +115,30 @@ class GraniteDoclingConverter:
 
         doctags_doc = DocTagsDocument.from_doctags_and_image_pairs(all_doctags, all_images)
         doc = DoclingDocument.load_from_doctags(doctags_doc, document_name=name)
-        md = doc.export_to_markdown()
-        logger.debug(f"Markdown for {pdf_path.name} ({len(md)} chars)")
-        return md
+        logger.debug(f"DoclingDocument for {pdf_path.name} ({len(list(doc.iterate_items()))} items)")
+        return doc
 
-    def convert_directory(self, source_path: str | Path) -> list[str]:
-        """Convert every supported file under *source_path* and return a list of markdown strings."""
+    def convert_directory(self, source_path: str | Path) -> list:
+        """Convert every supported file under *source_path* and return a list of ``DoclingDocument`` objects."""
         source_path = Path(source_path)
         files = sorted(_collect_files(source_path))
 
         if not files:
             raise FileNotFoundError(f"No supported documents found in {source_path}")
 
-        texts: list[str] = []
+        docs: list = []
         for i, fpath in enumerate(files, 1):
             perror(f"Converting {fpath.name} ({i}/{len(files)})...")
             try:
-                text = self.convert_file(fpath)
-                if text.strip():
-                    texts.append(text)
+                doc = self.convert_file(fpath)
+                if doc.export_to_markdown().strip():
+                    docs.append(doc)
                 else:
-                    logger.warning(f"{fpath.name} produced no text")
+                    logger.warning(f"{fpath.name} produced no content")
             except Exception as e:
                 logger.warning(f"Failed to convert {fpath.name}: {e}")
 
-        return texts
+        return docs
 
 
 def _collect_files(path: Path) -> list[Path]:
