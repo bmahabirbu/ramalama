@@ -95,7 +95,7 @@ class BaseEngine(ABC):
         if ramalama.common.podman_machine_accel:
             self.exec_args += ["--device", "/dev/dri"]
 
-        for path in ["/dev/dri", "/dev/kfd", "/dev/accel", "/dev/davinci*", "/dev/devmm_svm", "/dev/hisi_hdc"]:
+        for path in ["/dev/dri", "/dev/dxg", "/dev/kfd", "/dev/accel", "/dev/davinci*", "/dev/devmm_svm", "/dev/hisi_hdc"]:
             for dev in glob.glob(path):
                 self.exec_args += ["--device", dev]
 
