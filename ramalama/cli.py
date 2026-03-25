@@ -203,8 +203,17 @@ def parse_args_from_cmd(cmd: list[str]) -> tuple[argparse.ArgumentParser, argpar
     # e.g Config.image and Config.rag_image etc...
     # TODO(owalsh): refactor this to remove runtime specific config from the global config object
     for arg in args.__dict__.keys() & config._fields:
+        # Skip syncing "image" unless the user explicitly passed --image;
+        # its argparse default is stale (computed before config.backend was loaded).
+        if arg == "image" and not getattr(args, "image_override", False):
+            continue
         if getattr(args, arg) != getattr(config, arg):
             setattr(config, arg, getattr(args, arg))
+
+    # Resolve the container image now that config (including backend) is fully loaded.
+    if hasattr(args, "image") and not getattr(args, "image_override", False):
+        args.image = accel_image(config)
+
     return parser, args
 
 
