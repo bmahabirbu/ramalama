@@ -112,6 +112,9 @@ class BaseEngine(ABC):
 
             self.exec_args += ["-e", f"{k}={v}"]
 
+        if getattr(self.args, "backend", None) == "openvino":
+            self.exec_args += ["-e", "GGML_OPENVINO_DEVICE=GPU"]
+
     def handle_podman_specifics(self):
         if getattr(self.args, "podman_keep_groups", None):
             self.exec_args += ["--group-add", "keep-groups"]
