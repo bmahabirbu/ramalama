@@ -353,7 +353,12 @@ def load_cdi_config(spec_dirs: list[str]) -> CDI_RETURN_TYPE | None:
 
 
 def get_podman_machine_cdi_config() -> CDI_RETURN_TYPE | None:
-    cdi_config = run_cmd(["podman", "machine", "ssh", "cat", "/etc/cdi/nvidia.yaml"], encoding="utf-8").stdout.strip()
+    try:
+        cdi_config = run_cmd(
+            ["podman", "machine", "ssh", "cat", "/etc/cdi/nvidia.yaml"], encoding="utf-8"
+        ).stdout.strip()
+    except subprocess.CalledProcessError:
+        return None
     if cdi_config:
         return yaml.safe_load(cdi_config)
     return None
