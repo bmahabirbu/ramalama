@@ -76,6 +76,19 @@ def register_rag_subcommand(plugin, subparsers):
         action=OverrideDefaultAction,
         completer=local_images,
     )
+    parser.add_argument(
+        "--caption-images",
+        dest="caption_images",
+        action="store_true",
+        help="enable image captioning via a VLM to describe charts, diagrams, and photos",
+    )
+    parser.add_argument(
+        "--caption-model",
+        dest="caption_model",
+        default="hf://unsloth/gemma-4-E2B-it-GGUF",
+        help="VLM model for image captioning (default: hf://unsloth/gemma-4-E2B-it-GGUF)",
+        completer=suppressCompleter,
+    )
     def_threads = _default_threads()
     parser.add_argument(
         "-t",
